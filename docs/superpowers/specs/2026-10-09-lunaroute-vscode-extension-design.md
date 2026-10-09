@@ -2,7 +2,7 @@
 
 - Date: 2026-10-09
 - Kata: `b7rz` — Design native LunaRoute VS Code Chat and Agent extension
-- Status: Conversational design approved; written spec awaiting user review.
+- Status: Written spec approved by the user on 2026-10-09; implementation plan pending review.
 
 ## Goal and agreed scope
 
@@ -344,7 +344,7 @@ Inspected source references:
 ## Approval boundary
 
 This document records the agreed design and makes its engineering constraints
-explicit. It does not authorize product implementation or publication. After the
-user reviews and approves this written spec, create the implementation plan for
-both the extension and the scoped SaaS changes, then obtain plan review and an
-execution-method choice before starting product code.
+explicit. The user approved the written spec at commit `14e6210` on 2026-10-09.
+That approval authorizes implementation planning, not product implementation or
+publication. Obtain review of the implementation plan and an execution-method
+choice before starting product code.
