@@ -31,6 +31,25 @@ export function deferred<T>() {
   const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
   return { promise, resolve, reject };
 }
+export const LanguageModelChatMessageRole = { User: 1, Assistant: 2 };
+export const LanguageModelChatToolMode = { Auto: 1, Required: 2 };
+export class LanguageModelTextPart { constructor(public value: string) {} }
+export class LanguageModelToolCallPart { constructor(public callId: string, public name: string, public input: object) {} }
+export class LanguageModelToolResultPart { constructor(public callId: string, public content: unknown[]) {} }
+export class LanguageModelDataPart {
+  constructor(public data: Uint8Array, public mimeType: string) {}
+  static image(data: Uint8Array, mime: string) { return new LanguageModelDataPart(data, mime); }
+  static text(value: string, mime = 'text/plain') { return new LanguageModelDataPart(new TextEncoder().encode(value), mime); }
+  static json(value: unknown, mime = 'application/json') { return this.text(JSON.stringify(value), mime); }
+}
+export class LanguageModelChatMessage {
+  content: unknown[];
+  constructor(public role: number, content: string | unknown[], public name?: string) {
+    this.content = typeof content === 'string' ? [new LanguageModelTextPart(content)] : content;
+  }
+  static User(content: string | unknown[], name?: string) { return new LanguageModelChatMessage(1, content, name); }
+  static Assistant(content: string | unknown[], name?: string) { return new LanguageModelChatMessage(2, content, name); }
+}
 export const ExtensionKind = { UI: 1, Workspace: 2 };
 export const UIKind = { Desktop: 1, Web: 2 };
 export const ProgressLocation = { Notification: 15 };
