@@ -274,6 +274,18 @@ describe('encrypted storage and connection epochs', () => {
     await expect(observed).resolves.toBeUndefined();
   });
 
+  it('reports success when user cancellation arrives after credential commit', async () => {
+    const f = await fixture();
+    const login = f.begin();
+    f.controller.onDidChange(() => {
+      if (f.controller.snapshot().connection) login.cancel.cancel();
+    });
+    await send(callback(await f.opened));
+    await expect(login.result).resolves.toBeUndefined();
+    expect(await f.secrets.get(key)).toBe(JSON.stringify(connection));
+    expect(f.controller.snapshot().connection).toEqual(connection);
+  });
+
   it('rejects a store failure without publishing a connection', async () => {
     const f = await fixture();
     f.secrets.failStore = true;

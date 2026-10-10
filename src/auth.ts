@@ -188,9 +188,10 @@ export async function createAuthController(
         if (login.signal.aborted) throw abortReason(login.signal);
         if (disposed || current !== generation) throw cancelled();
       };
-      const cancellation = token.onCancellationRequested(() => login.abort(cancelled()));
+      let committed = false;
+      const cancellation = token.onCancellationRequested(() => { if (!committed) login.abort(cancelled()); });
       if (token.isCancellationRequested) login.abort(cancelled());
-      const timeout = setTimeout(() => login.abort(new LunaRouteError('network', 408)), LOGIN_TIMEOUT_MS);
+      const timeout = setTimeout(() => { if (!committed) login.abort(new LunaRouteError('network', 408)); }, LOGIN_TIMEOUT_MS);
       try {
         const approval = await browserCode(login.signal, openExternal, deps.frontUrl ?? FRONT_URL);
         check();
@@ -228,6 +229,7 @@ export async function createAuthController(
               check();
             }
             knownRaw = raw;
+            committed = true;
             publish(next);
           } catch (error) {
             if (error instanceof LunaRouteError) throw error;
