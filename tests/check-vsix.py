@@ -31,5 +31,5 @@ with ZipFile(sys.argv[1]) as archive:
         data = archive.read(name)
         for canary in [b"lr_host_fixture_", b"lr_provider_fixture_", b"lr_fake_DO_NOT_LOG", b"private_probe_prompt_or_tool_content", b"startGatewayFixture", b"lunaroute-probe"]:
             assert canary not in data, "Test fixture/canary leaked into " + name
-        assert not re.search(rb"lr_(?:live|platform)_[A-Za-z0-9_-]{16,}", data), "Credential-shaped value in " + name
+        assert not re.search(rb"lr_(?:[0-9a-f]{64}|(?:live|platform)_[A-Za-z0-9_-]{16,})", data), "Credential-shaped value in " + name
 print("PASS VSIX file allowlist, runtime manifest, full license texts and fixture/credential canary scan")

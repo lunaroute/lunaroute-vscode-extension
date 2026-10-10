@@ -37,7 +37,7 @@ These are **VS Code** controls, not LunaRoute configuration. The extension never
 
 ## Credentials, data and limits
 
-- The dedicated `lunaroute-vscode` key lives only in VS Code **SecretStorage**. There is no plaintext fallback or remote credential file. Secure-storage failures need repair of the desktop's storage/keyring, not a workaround file.
+- The dedicated `lunaroute-vscode` key lives only in VS Code **SecretStorage**. There is no plaintext fallback or remote credential file. Secure-storage failures need repair of the desktop's storage/keyring, not a workaround file. Cancellation waits for in-flight secure writes and cleanup to settle.
 - **LunaRoute: Sign Out** removes the local saved connection and aborts its work. It **does not revoke the server-side key**. Revoke unused keys in the [LunaRoute dashboard](https://app.lunaroute.com/dashboard), including keys left by an approved but cancelled/failed sign-in.
 - Messages, supported images and tool results supplied by VS Code are sent to LunaRoute. Requests resend full history with `store: false`; the extension does not keep a conversation store or log credentials, callback URLs or conversation contents. VS Code and service data policies remain separate.
 - There are no workspace-configurable endpoints, automatic inference/exchange retries, or silent model/provider fallback.
@@ -54,7 +54,7 @@ These are **VS Code** controls, not LunaRoute configuration. The extension never
 | 402 / billing | Open Manage → dashboard and finish the connected organization's plan/billing setup. |
 | 429 / rate limit | Wait for the displayed retry interval, if supplied, then retry explicitly. |
 | Network / no models | Check desktop connectivity, then Refresh Models. Transient catalog failures can retain same-connection metadata; no login-placeholder model is created. |
-| Storage / incomplete sign-out | Repair secure storage and retry; revoke the key in the dashboard if necessary. |
+| Storage / incomplete cleanup | Repair secure storage and retry Sign Out; a cancelled sign-in may still have a saved key. Revoke unused keys in the dashboard. |
 | Unsupported / oversized history | Reduce input or start a new chat. Report native compatibility failures rather than dropping required history. |
 
 ## Scope
@@ -73,6 +73,7 @@ npm run test:host                 # desktop display required
 # Linux headless: xvfb-run -a npm run test:host
 npm run package
 python3 tests/check-vsix.py lunaroute.vsix
+python3 tests/check-vsix-negative.py lunaroute.vsix
 # Packaged install into a disposable profile:
 # xvfb-run -a npm run test:host -- --vsix lunaroute.vsix
 ```

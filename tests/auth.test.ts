@@ -286,6 +286,30 @@ describe('encrypted storage and connection epochs', () => {
     expect(f.controller.snapshot().connection).toEqual(connection);
   });
 
+  it('reports failed cancellation cleanup only after the secure mutation settles and supports sign-out recovery', async () => {
+    const f = await fixture();
+    const gate = deferred<void>();
+    f.secrets.nextStoreGate = gate.promise;
+    f.secrets.failDelete = true;
+    const login = f.begin();
+    await send(callback(await f.opened));
+    await f.secrets.storeStarted.promise;
+    let settled = false;
+    const observed = login.result.then(result => { settled = true; return result; });
+    login.cancel.cancel();
+    await new Promise<void>(resolve => setImmediate(resolve));
+    const settledBeforeStorage = settled;
+    gate.resolve();
+    await expect(observed).resolves.toMatchObject({ kind: 'storage' });
+    expect(settledBeforeStorage).toBe(false);
+    expect(await f.secrets.get(key)).toBe(JSON.stringify(connection));
+    expect(f.controller.snapshot().connection).toBeUndefined();
+    f.secrets.failDelete = false;
+    await f.controller.signOut();
+    expect(await f.secrets.get(key)).toBeUndefined();
+    expect(f.controller.snapshot().connection).toBeUndefined();
+  });
+
   it('rejects a store failure without publishing a connection', async () => {
     const f = await fixture();
     f.secrets.failStore = true;
@@ -353,6 +377,28 @@ describe('encrypted storage and connection epochs', () => {
     await expect(olderLogin.result).resolves.toMatchObject({ kind: 'cancelled' });
     await vi.waitFor(async () => expect(JSON.parse((await f.secrets.get(key))!)).toEqual(newer));
     await vi.waitFor(() => expect(second.controller.snapshot().connection).toEqual(newer));
+  });
+
+  it('does not clear a newer observed connection when an obsolete write rollback fails', async () => {
+    const f = await fixture();
+    const second = await fixture(f.secrets);
+    const newer = { ...connection, apiKey: 'lr_newer_test_key_not_real' };
+    second.service.body = { ...wire, full_key: newer.apiKey };
+    const gate = deferred<void>();
+    f.secrets.nextStoreGate = gate.promise;
+    const olderLogin = f.begin();
+    await send(callback(await f.opened));
+    await f.secrets.storeStarted.promise;
+    const newerLogin = second.begin();
+    await send(callback(await second.opened));
+    await expect(newerLogin.result).resolves.toBeUndefined();
+    await vi.waitFor(() => expect(f.controller.snapshot().connection).toEqual(newer));
+    const current = f.controller.snapshot();
+    vi.spyOn(f.secrets, 'store').mockRejectedValueOnce(new Error('private storage diagnostic'));
+    gate.resolve();
+    await expect(olderLogin.result).resolves.toMatchObject({ kind: 'storage' });
+    expect(f.controller.snapshot().connection).toEqual(newer);
+    expect(current.signal.aborted).toBe(false);
   });
 
   it('propagates external sign-out and aborts the previous connection epoch', async () => {

@@ -28,6 +28,7 @@ jobs:
         run: |
           npm run package
           python3 tests/check-vsix.py lunaroute.vsix
+          python3 tests/check-vsix-negative.py lunaroute.vsix
       - name: Install and test the packaged extension in a disposable profile
         if: runner.os == 'Linux'
         run: xvfb-run -a npm run test:host -- --vsix lunaroute.vsix

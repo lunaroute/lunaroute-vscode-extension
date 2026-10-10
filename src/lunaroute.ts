@@ -46,7 +46,7 @@ export function userMessage(error: unknown): string {
     'rate-limit': 'LunaRoute is rate limited. Wait before trying again.',
     network: 'Could not complete the LunaRoute connection. Check your network and try again.',
     upstream: 'The LunaRoute service is temporarily unavailable. Try again later.',
-    storage: 'Secure credential storage failed. Sign-out may be incomplete; revoke any unused key in the LunaRoute dashboard.',
+    storage: 'Secure credential storage failed. Saved-credential cleanup may be incomplete; retry Sign Out and revoke any unused key in the LunaRoute dashboard.',
     input: 'This chat contains unsupported or oversized input. Reduce it or start a new chat.',
     protocol: 'LunaRoute returned an unsupported response. Try again or start a fresh sign-in.',
     cancelled: 'LunaRoute operation cancelled.',

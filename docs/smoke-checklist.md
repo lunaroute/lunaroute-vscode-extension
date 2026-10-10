@@ -6,12 +6,12 @@ Status: **preview; not release-certified**. Source/unit checks, direct extension
 
 | Date (UTC) | Environment / model | Expected | Actual / evidence |
 | --- | --- | --- | --- |
-| 2026-10-10 | Node 24.21.0 / npm 11.19.0; controlled HTTP/SSE; real OpenAI SDK 7.32.0 | Auth, catalog, Responses and provider contracts pass | 197 tests, typecheck and build passed before host checks. Unit VS Code shims are not host evidence. |
+| 2026-10-10 | Node 24.21.0 / npm 11.19.0; controlled HTTP/SSE; real OpenAI SDK 7.32.0 | Auth, catalog, Responses and provider contracts pass | 199 tests, typecheck and build passed before host checks. Unit VS Code shims are not host evidence. |
 | 2026-10-10 | Desktop VS Code **1.141.0**, Linux x64, Xvfb, fresh user/extension directories, local empty workspace; synthetic `lunaroute-probe/probe-chat` | Stable API registration/classes, signed-out product commands and no credential-bearing exports | Passed in actual extension host. Product activation used production factories without overrides; only the separate test fixture received loopback endpoints and synthetic credentials. |
 | 2026-10-10 | Same actual host, controlled fixture, no GitHub session | PKCE/SecretStorage events; model selection/counting; SDK text, multiple tools/results, images and opaque replay; caller cancellation, replacement and model changes | Passed through public `lm.selectChatModels` / `sendRequest`. Native model broker returned replay data and accepted it in a later direct request. No extension-side tool execution. This does **not** prove the built-in Chat/Agent caller preserves that history. |
 | 2026-10-10 | SaaS draft PR [#1436](https://github.com/lunaroute/lunaroute-saas/pull/1436), commit `756858b09644e51b6581be4a8d21e6b9e00e5799` | Scoped auth/onboarding checks | Local Go/frontend gates and PR CI passed. **Not merged or deployed**; deployed-SHA evidence unavailable. |
 
-Final local extension gates were repeated with the planned Node 24 toolchain, extracted under ignored \`.vscode-test/node24/\` after verifying the official SHA-256 manifest; earlier Node 22 runs were preliminary. The inspected VSIX SHA-256 was \`d791fc2c5e2ff499f5e6462eba69215ab2790df5ba0ca430b58df63de286a71d\` (ZIP timestamps mean a new package run can change that archive hash).
+Final local extension gates were repeated with the planned Node 24 toolchain, extracted under ignored \`.vscode-test/node24/\` after verifying the official SHA-256 manifest; earlier Node 22 runs were preliminary. The inspected VSIX SHA-256 was \`4d274ba867c7a42863eb34a2da8baf0fdbf286fd3ae21511551c2177cf49b36b\` (ZIP timestamps mean a new package run can change that archive hash).
 
 The host run emitted VS Code startup diagnostics (unsigned-in GitHub/agent-host channels and a platform deprecation warning) and native cancellation diagnostics. The process exited 0 with all contract checkpoints passing. No real LunaRoute credentials, customer prompts or live gateway inference were used. Real SecretStorage API/events were exercised; this is not an OS-keyring encryption audit or a two-window test.
 
@@ -20,6 +20,19 @@ The Linux packaged extension was also installed from the inspected VSIX into a d
 SaaS gates were rerun on 2026-10-10: Go passed (cached test results), frontend 239 files / 2408 tests passed, typecheck/build passed. Lint exited 0 with **23 pre-existing warnings**, not a warning-free result; four existing jsdom navigation warnings remain. The warning files are unchanged from SaaS base \`c02f6e71\`. Extension \`npm ci\` reported zero vulnerabilities. The extension CI workflow is configured and syntax-checked, but **has not run** because no remote repository has been established.
 
 Local logs are in this plan's ignored `.superpowers/sdd/2026-10-09-lunaroute-vscode-extension/` workspace (`task-7-green-wiring.log`, `task-7-host-first.log` and subsequent host/check logs); they must not ship.
+
+## Final source review
+
+One fresh-context, read-only reviewer inspected both source ranges through extension `6e2d420` and SaaS `756858b`. The parent then made the planned single TDD correction pass:
+
+- Cancellation now waits for secure mutation/cleanup settlement and reports storage failure instead of ordinary cancellation. Failed-write ownership permits explicit Sign Out recovery without activating that credential; an obsolete failure cannot clear a newer observed connection. The regressions were observed RED then GREEN, including a generation-guard mutation check.
+- The archive scanner now detects the actual user-key format (`lr_` plus 64 hexadecimal characters). An otherwise-valid archive containing a synthetic key of that shape was accepted before the fix and rejected afterward. This negative check now runs in packaging CI; no real credential was found in the earlier artifact.
+
+After the corrections: **199/199 tests**, typecheck/build/package, normal and negative archive checks, both actual Linux host modes, and uncached focused Go authorization/exchange tests passed. Logs are `final-*.log` in the corresponding plan workspaces. The reviewer did not execute tests; this is parent verification, not a second independent review.
+
+**Deferred minors:** the extension sends `hostname` where exchange expects `label`, leaving generic dashboard key names; malformed catalog rows are safely excluded but lack sanitized rejection diagnostics. These remain open, not silently fixed.
+
+Storage failure can still leave a saved key until storage is repaired and Sign Out succeeds or the key is revoked. Cancellation may wait for the platform storage call; this does not claim cross-process atomicity. All live/platform/ownership release gates below remain open.
 
 ## Repeatable direct host checks
 

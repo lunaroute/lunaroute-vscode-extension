@@ -206,7 +206,8 @@ export async function createAuthController(
           throw signal.aborted ? abortReason(signal) : error;
         } finally { clearTimeout(exchangeTimeout); }
         const raw = JSON.stringify(next);
-        await abortable(mutate(async () => {
+        // Platform writes cannot be cancelled; observe cleanup failures before settling.
+        await mutate(async () => {
           check();
           try {
             await write(raw);
@@ -220,11 +221,19 @@ export async function createAuthController(
             publish(next);
           } catch (error) {
             if (error instanceof LunaRouteError) throw error;
+            try {
+              if (await secrets.get(SECRET) === raw) {
+                await settleReads();
+                // Retain ownership for cleanup without activating a failed sign-in.
+                if (!disposed && current === generation) { knownRaw = raw; publish(); }
+              }
+            } catch { /* Storage still needs explicit recovery. */ }
             throw new LunaRouteError('storage');
           } finally { ownWrite = undefined; }
-        }), login.signal);
+        });
         check();
       } catch (error) {
+        if (error instanceof LunaRouteError && error.kind === 'storage') throw error;
         if (login.signal.aborted) throw abortReason(login.signal);
         throw error instanceof LunaRouteError ? error : new LunaRouteError('network');
       } finally {
