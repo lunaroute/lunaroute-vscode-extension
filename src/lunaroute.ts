@@ -7,6 +7,19 @@ export class LunaRouteError extends Error {
     this.name = 'LunaRouteError';
   }
 }
+export function abortReason(signal: AbortSignal): LunaRouteError {
+  return signal.reason instanceof LunaRouteError ? signal.reason : new LunaRouteError('cancelled');
+}
+export function abortable<T>(promise: PromiseLike<T>, signal: AbortSignal): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const stop = () => { signal.removeEventListener('abort', stop); reject(abortReason(signal)); };
+    Promise.resolve(promise).then(
+      value => { signal.removeEventListener('abort', stop); resolve(value); },
+      error => { signal.removeEventListener('abort', stop); reject(error); },
+    );
+    if (signal.aborted) stop(); else signal.addEventListener('abort', stop, { once: true });
+  });
+}
 export function buildHeaders(key: string, attribution: Attribution): Record<string, string> {
   return {
     Authorization: `Bearer ${key}`,

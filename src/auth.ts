@@ -2,7 +2,7 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { createServer } from 'node:http';
 import { hostname } from 'node:os';
 import * as vscode from 'vscode';
-import { API_URL, EXCHANGE_TIMEOUT_MS, FRONT_URL, httpError, LOGIN_TIMEOUT_MS, LunaRouteError } from './lunaroute.js';
+import { abortable, abortReason, API_URL, EXCHANGE_TIMEOUT_MS, FRONT_URL, httpError, LOGIN_TIMEOUT_MS, LunaRouteError } from './lunaroute.js';
 
 export interface Connection { readonly apiKey: string; readonly orgId: string; readonly email?: string }
 export interface AuthSnapshot { readonly connection?: Connection; readonly epoch: number; readonly signal: AbortSignal }
@@ -14,19 +14,6 @@ export interface AuthController extends vscode.Disposable {
 }
 const SECRET = 'lunaroute.connection';
 const cancelled = () => new LunaRouteError('cancelled');
-function abortReason(signal: AbortSignal) {
-  return signal.reason instanceof LunaRouteError ? signal.reason : cancelled();
-}
-function abortable<T>(promise: PromiseLike<T>, signal: AbortSignal): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const stop = () => { signal.removeEventListener('abort', stop); reject(abortReason(signal)); };
-    Promise.resolve(promise).then(
-      value => { signal.removeEventListener('abort', stop); resolve(value); },
-      error => { signal.removeEventListener('abort', stop); reject(error); },
-    );
-    if (signal.aborted) stop(); else signal.addEventListener('abort', stop, { once: true });
-  });
-}
 function parseConnection(value: unknown, exchange = false): Connection {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new LunaRouteError('protocol');
   const record = value as Record<string, unknown>;
