@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import path from 'node:path';
 import * as vscode from 'vscode';
 import type { ProbeAPI } from '../host-fixture/extension.js';
 
@@ -31,7 +32,11 @@ export async function run(): Promise<void> {
   console.log('Direct public-API host contract checks; VS Code ' + vscode.version + ' on ' + process.platform);
   assert.equal(vscode.version, '1.141.0');
   const product = vscode.extensions.getExtension('lunaroute.lunaroute');
-  assert.ok(product, 'Product development extension is installed');
+  assert.ok(product, 'Product extension is installed');
+  if (process.env.LR_PACKAGED_ROOT) {
+    const relative = path.relative(process.env.LR_PACKAGED_ROOT, product.extensionPath);
+    assert.ok(relative && !relative.startsWith('..') && !path.isAbsolute(relative), 'Product is loaded from the disposable VSIX installation, not development sources');
+  }
   assert.equal(await product.activate(), undefined, 'Product must not export a credential/test API');
   assert.equal(product.extensionKind, vscode.ExtensionKind.UI);
   assert.deepEqual(await vscode.lm.selectChatModels({ vendor: 'lunaroute' }), []);

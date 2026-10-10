@@ -1,0 +1,39 @@
+name: Check and package
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  check:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+      - run: npm run build
+      - name: Real VS Code 1.141.0 host contracts
+        if: runner.os == 'Linux'
+        run: xvfb-run -a npm run test:host
+      - name: Package and inspect actual VSIX
+        if: runner.os == 'Linux'
+        run: |
+          npm run package
+          python3 tests/check-vsix.py lunaroute.vsix
+      - name: Install and test the packaged extension in a disposable profile
+        if: runner.os == 'Linux'
+        run: xvfb-run -a npm run test:host -- --vsix lunaroute.vsix
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'Linux'
+        with:
+          name: lunaroute-vsix
+          path: lunaroute.vsix
+          if-no-files-found: error
