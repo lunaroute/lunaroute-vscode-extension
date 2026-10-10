@@ -137,6 +137,14 @@ export class Catalog implements vscode.Disposable {
       throw failure;
     } finally { clearTimeout(timeout); }
   }
+  invalidate(error: LunaRouteError): void {
+    if (this.disposed) return;
+    this.flight?.controller.abort(new LunaRouteError('cancelled'));
+    this.flight = undefined;
+    this.cached = [];
+    this.fault = error;
+    this.changes.fire();
+  }
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;

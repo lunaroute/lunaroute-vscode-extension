@@ -1,0 +1,22 @@
+{
+  "name": "lunaroute-host-fixture",
+  "displayName": "LunaRoute host fixture (tests only)",
+  "publisher": "lunaroute-test",
+  "version": "0.0.0",
+  "private": true,
+  "engines": {
+    "vscode": "^1.141.0"
+  },
+  "main": "./dist/extension.cjs",
+  "extensionKind": [
+    "ui"
+  ],
+  "contributes": {
+    "languageModelChatProviders": [
+      {
+        "vendor": "lunaroute-probe",
+        "displayName": "LunaRoute test probe"
+      }
+    ]
+  }
+}

@@ -1,4 +1,4 @@
-import type { CancellationToken, Event, SecretStorage } from 'vscode';
+import type { CancellationToken, Event, LanguageModelChatProvider, SecretStorage } from 'vscode';
 import { vi } from 'vitest';
 
 export class Disposable {
@@ -19,6 +19,7 @@ export class EventEmitter<T> {
   fire(value: T) { for (const listener of this.listeners) listener(value); }
   dispose() { this.listeners.clear(); }
 }
+export class CancellationError extends Error { constructor() { super('Canceled'); this.name = 'Canceled'; } }
 export class CancellationTokenSource {
   private emitter = new EventEmitter<void>();
   readonly token: CancellationToken = { isCancellationRequested: false, onCancellationRequested: this.emitter.event };
@@ -69,11 +70,27 @@ export const commands = {
 export const env = { uiKind: 1, remoteName: undefined as string | undefined,
   openExternal: vi.fn(async (_uri: { toString(): string }) => false),
 };
-export const notices = { information: [] as string[], errors: [] as string[], nextPick: undefined as string | undefined };
+export const registeredProviders = new Map<string, LanguageModelChatProvider>();
+export const lm = {
+  registerLanguageModelChatProvider(vendor: string, provider: LanguageModelChatProvider) {
+    if (registeredProviders.has(vendor)) throw new Error('Duplicate provider');
+    registeredProviders.set(vendor, provider);
+    return new Disposable(() => { registeredProviders.delete(vendor); });
+  },
+  invokeTool() { throw new Error('The LunaRoute extension must not execute tools'); },
+};
+export const preferences = new Map<string, unknown>();
+export const workspace = { getConfiguration(section = '') {
+  return { get: (key: string) => preferences.get(`${section}.${key}`),
+    async update(key: string, value: unknown) { preferences.set(`${section}.${key}`, value); } };
+} };
+export const notices = { information: [] as string[], errors: [] as string[], nextPick: undefined as string | undefined,
+  picks: [] as { items: readonly { label: string }[]; options: unknown }[] };
 export const window = {
   async showInformationMessage(message: string) { notices.information.push(message); },
   async showErrorMessage(message: string) { notices.errors.push(message); },
-  async showQuickPick<T extends { label: string }>(items: readonly T[], _options?: unknown) {
+  async showQuickPick<T extends { label: string }>(items: readonly T[], options?: unknown) {
+    notices.picks.push({ items, options });
     return items.find(item => item.label === notices.nextPick);
   },
   async withProgress<T>(_options: unknown, task: (progress: unknown, token: CancellationToken) => Promise<T>) {

@@ -17,16 +17,22 @@
   "extensionKind": [
     "ui"
   ],
+  "activationEvents": ["onStartupFinished"],
   "contributes": {
     "commands": [
       { "command": "lunaroute.signIn", "title": "LunaRoute: Sign In" },
       { "command": "lunaroute.signOut", "title": "LunaRoute: Sign Out" },
-      { "command": "lunaroute.manage", "title": "LunaRoute: Manage" }
+      { "command": "lunaroute.manage", "title": "LunaRoute: Manage" },
+      { "command": "lunaroute.refreshModels", "title": "LunaRoute: Refresh Models" }
+    ],
+    "languageModelChatProviders": [
+      { "vendor": "lunaroute", "displayName": "LunaRoute", "managementCommand": "lunaroute.manage" }
     ]
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:host": "npm run build && node tests/run-vscode.mjs",
     "check": "npm run typecheck && npm test",
     "build": "esbuild src/extension.ts --bundle --platform=node --target=node22 --format=cjs --external:vscode --outfile=dist/extension.cjs"
   },
