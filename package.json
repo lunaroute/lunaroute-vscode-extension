@@ -1,0 +1,45 @@
+{
+  "name": "lunaroute",
+  "displayName": "LunaRoute",
+  "description": "LunaRoute models in native VS Code Chat and Agent mode",
+  "version": "0.1.0",
+  "publisher": "lunaroute",
+  "license": "MIT",
+  "keywords": [
+    "lunaroute",
+    "language-models"
+  ],
+  "engines": {
+    "vscode": "^1.141.0"
+  },
+  "type": "module",
+  "main": "./dist/extension.cjs",
+  "extensionKind": [
+    "ui"
+  ],
+  "contributes": {
+    "commands": [
+      { "command": "lunaroute.signIn", "title": "LunaRoute: Sign In" },
+      { "command": "lunaroute.signOut", "title": "LunaRoute: Sign Out" },
+      { "command": "lunaroute.manage", "title": "LunaRoute: Manage" }
+    ]
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "check": "npm run typecheck && npm test",
+    "build": "esbuild src/extension.ts --bundle --platform=node --target=node22 --format=cjs --external:vscode --outfile=dist/extension.cjs"
+  },
+  "dependencies": {
+    "openai": "7.32.0"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.5",
+    "@types/vscode": "1.140.0",
+    "@vscode/test-electron": "3.1.0",
+    "@vscode/vsce": "4.0.0",
+    "esbuild": "0.28.2",
+    "typescript": "7.0.2",
+    "vitest": "5.0.3"
+  }
+}

@@ -1,0 +1,8 @@
+.kata.local.toml
+# roborev snapshots
+/.roborev/
+node_modules/
+dist/
+.vscode-test/
+*.vsix
+.worktrees/
