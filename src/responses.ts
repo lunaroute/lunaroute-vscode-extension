@@ -310,10 +310,17 @@ export async function* streamResponse(key: string, request: OpenAI.Responses.Res
         case 'response.output_item.done': {
           const state = stateFor(event.item, event.output_index);
           const parts = snapshotParts(state, event.item as Record<string, unknown>, false);
-          if (parts.length) { eagerOrder(state); for (const part of parts) yield part; }
-          if (state.item.type === 'reasoning' && !state.replayed && !pendingBefore(state)) {
+          if (parts.length) {
             eagerOrder(state);
-            yield replayPart(state);
+            for (const part of parts) { if (combined.aborted) throw abortReason(combined); yield part; }
+          }
+          for (const ready of [...items.values()].sort((a, b) => a.index - b.index)) {
+            if (ready.item.type !== 'reasoning' || !ready.complete || ready.replayed) continue;
+            const earlier = [...items.values()].filter(other => other.index < ready.index);
+            if (earlier.length !== ready.index || earlier.some(other => !other.complete) || pendingBefore(ready)) continue;
+            if (combined.aborted) throw abortReason(combined);
+            eagerOrder(ready);
+            yield replayPart(ready);
           }
           break;
         }

@@ -351,6 +351,24 @@ it.each(['unknown-part', 'orphan-reasoning', 'missing-reasoning'])('does not dis
   expect(result.error).toMatchObject({ kind: 'protocol' });
   expect(result.parts).toEqual([]);
 });
+it('waits for earlier messages before publishing ready reasoning, then preserves later text', async () => {
+  const last = { ...messageItem('later'), id: 'msg_2' };
+  const f = await service([
+    textStart[0],
+    event('response.output_item.added', { output_index: 1, item: { ...reasoning, status: 'in_progress' } }),
+    event('response.output_item.done', { output_index: 1, item: reasoning }),
+    textStart[1],
+    event('response.output_item.done', { output_index: 0, item: messageItem('hello') }),
+    event('response.output_item.added', { output_index: 2, item: { ...last, content: [], status: 'in_progress' } }),
+    event('response.output_text.delta', { output_index: 2, item_id: 'msg_2', content_index: 0, delta: 'later' }),
+    event('response.output_item.done', { output_index: 2, item: last }),
+    complete([messageItem('hello'), reasoning, last]),
+  ]);
+  const result = await collect(streamResponse(key, request(), attribution, new AbortController().signal, f.baseURL));
+  expect(result.error).toBeUndefined();
+  expect(result.parts).toEqual([text('hello'), replay(), text('later')]);
+});
+
 it('validates real reasoning content/summary fragments without rendering them as answer text', async () => {
   const item = { ...reasoning, encrypted_content: null,
     content: [{ type: 'reasoning_text', text: 'hidden reasoning' }], summary: [{ type: 'summary_text', text: 'summary' }] };
@@ -435,6 +453,20 @@ it('cancels after a text delta without retrying or publishing buffered calls', a
   expect(await next).toMatchObject({ kind: 'cancelled' });
   response?.end();
 });
+it('rechecks cancellation between multiple text parts from one completed snapshot', async () => {
+  const item = { ...messageItem(''), content: [
+    { type: 'output_text', text: 'A', annotations: [] }, { type: 'output_text', text: 'B', annotations: [] },
+  ] };
+  const f = await service([textStart[0], event('response.output_item.done', { output_index: 0, item }), complete([item])]);
+  const controller = new AbortController();
+  const stream = streamResponse(key, request(), attribution, controller.signal, f.baseURL);
+  try {
+    expect((await stream.next()).value).toEqual(text('A'));
+    controller.abort();
+    await expect(stream.next()).rejects.toMatchObject({ kind: 'cancelled' });
+  } finally { await stream.return(undefined); }
+});
+
 it('does not start an already-cancelled request', async () => {
   let requests = 0;
   const f = await gateway((_req, res) => { requests++; writeSse(res, [...textStart, ...textEnd]); });
