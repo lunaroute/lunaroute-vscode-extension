@@ -1,0 +1,37 @@
+name: Draft VSIX release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Match the tag to the extension version
+        run: node tests/check-release-tag.mjs "$GITHUB_REF_NAME"
+  check:
+    needs: validate
+    uses: ./.github/workflows/check.yml
+  release:
+    needs: check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: lunaroute-vsix
+      - name: Create a draft with the tested VSIX
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" lunaroute.vsix \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag --draft --generate-notes \
+            --title "LunaRoute for VS Code $GITHUB_REF_NAME" \
+            --notes "Preview VSIX. See the README for installation and the smoke checklist for remaining release gates. Marketplace publishing is not automated."
