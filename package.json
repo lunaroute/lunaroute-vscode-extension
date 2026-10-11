@@ -5,6 +5,10 @@
   "version": "0.1.0",
   "publisher": "lunaroute",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lunaroute/lunaroute-vscode-extension.git"
+  },
   "preview": true,
   "keywords": [
     "lunaroute",
@@ -36,7 +40,7 @@
     "test:host": "npm run build && node tests/run-vscode.mjs",
     "check": "npm run typecheck && npm test",
     "vscode:prepublish": "npm run check && npm run build",
-    "package": "vsce package --no-dependencies --allow-missing-repository --out lunaroute.vsix",
+    "package": "vsce package --no-dependencies --out lunaroute.vsix",
     "build": "esbuild src/extension.ts --bundle --platform=node --target=node22 --format=cjs --external:vscode --legal-comments=external --outfile=dist/extension.cjs"
   },
   "dependencies": {

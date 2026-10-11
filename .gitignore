@@ -1,8 +1,21 @@
 .kata.local.toml
 # roborev snapshots
 /.roborev/
+# Dependencies, build output and test artifacts
 node_modules/
 dist/
+coverage/
 .vscode-test/
 *.vsix
+*.log
+
+# Local credentials and environment overrides
+.env
+.env.*
+!.env.example
+
+# Agent workspaces and OS files
 .worktrees/
+.superpowers/
+.DS_Store
+Thumbs.db

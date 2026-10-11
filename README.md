@@ -2,6 +2,8 @@
 
 LunaRoute models in native VS Code Chat and Agent mode, with browser sign-in instead of copying API keys.
 
+[Source](https://github.com/lunaroute/lunaroute-vscode-extension) · [Build and test](https://github.com/lunaroute/lunaroute-vscode-extension/actions/workflows/check.yml)
+
 **Preview, not published or release-certified.** The scoped SaaS sign-in change still needs authorized deployment. Linux VS Code 1.141.0 direct extension-host contracts pass; live native Chat/Agent, other desktop OSes and remote workspaces remain release gates. See the source evidence document `docs/smoke-checklist.md`.
 
 ## Install and connect
@@ -80,6 +82,8 @@ python3 tests/check-vsix-negative.py lunaroute.vsix
 
 Host tests use a separate synthetic probe extension, loopback HTTP and a temporary profile; they do not access the user's LunaRoute connection. Packaging includes the runtime bundle and legal/documentation files only. CI checks/builds on Windows, macOS and Linux, runs host/package checks on Linux and uploads a VSIX artifact; it does **not** publish or deploy SaaS.
 
-The provisional publisher `lunaroute` is not proof of Marketplace ownership. The real repository URL, publisher ownership, authorized SaaS deployment, native compatibility/calibration and remaining platform matrix must be resolved before publication. The local missing-repository packaging allowance is not publication approval.
+The provisional publisher `lunaroute` is not proof of Marketplace ownership. Publisher ownership, authorized SaaS deployment, native compatibility/calibration and the remaining platform matrix must be resolved before publication. Creating the GitHub repository does not publish the extension to the Marketplace.
 
-MIT; bundled SDK notices are in `THIRD_PARTY_NOTICES.txt`.
+## License
+
+[MIT](LICENSE) — Copyright (c) 2026 LunaRoute, Inc. Bundled SDK notices are in `THIRD_PARTY_NOTICES.txt`.
