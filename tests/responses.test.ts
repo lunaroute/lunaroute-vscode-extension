@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
 import * as vscode from 'vscode';
 import { buildResponsesRequest, estimateTokens, streamResponse } from '../src/responses.js';
+import { mapCatalog } from '../src/catalog.js';
 import { capture, LunaRouteError, userMessage } from '../src/lunaroute.js';
 import { deferred } from './vscode.js';
 import { startGatewayFixture, writeSse } from './fixtures/responses-sse.js';
@@ -557,6 +558,24 @@ it('accepts null tool-call and annotation fields while still rejecting a real as
   const async1 = { id: 'fc_2', type: 'function_call', call_id: 'call-2', name: 'read_file', arguments: '{}', async: true, caller: null, namespace: null };
   const g = await service([event('response.output_item.added', { output_index: 0, item: async1 })]);
   expect(userMessage((await collect(streamResponse(key, request(), attribution, new AbortController().signal, g.baseURL))).error)).toContain('item:function_call');
+});
+it('routes every catalog model through /v1/responses and nothing else', async () => {
+  // One client contract for every LunaRoute model: the gateway adapts upstream dialects, the extension
+  // never selects a per-model API (chat completions, messages, or a host-declared apiType).
+  const models = mapCatalog({ data: [
+    { id: 'chat-a', display_name: 'A', context_window: 131072, max_output_tokens: 8192, capabilities: { tools: true, vision: true } },
+    { id: 'chat-b', display_name: 'B', context_window: 32768, max_output_tokens: 4096, capabilities: {} },
+    { id: 'vendor/raw-id', context_window: 8192, max_output_tokens: 1024, capabilities: { tools: true } },
+  ] });
+  const f = await service([...textStart, ...textEnd]);
+  for (const candidate of models) {
+    const built = buildResponsesRequest(candidate, [user('hello')],
+      candidate.capabilities?.toolCalling ? { ...auto, tools } : auto);
+    const result = await collect(streamResponse(key, built, attribution, new AbortController().signal, f.baseURL));
+    expect(result.error).toBeUndefined();
+  }
+  expect(f.requests.map(request => request.path)).toEqual(['/v1/responses', '/v1/responses', '/v1/responses']);
+  for (const sent of f.requests) expect(sent.body).toMatchObject({ stream: true, store: false });
 });
 it('validates real reasoning content/summary fragments without rendering them as answer text', async () => {
   const item = { ...reasoning, encrypted_content: null,
