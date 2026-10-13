@@ -21,6 +21,8 @@ with ZipFile(sys.argv[1]) as archive:
     assert manifest["extensionKind"] == ["ui"]
     assert "browser" not in manifest and "enabledApiProposals" not in manifest
     assert manifest["contributes"]["languageModelChatProviders"][0]["vendor"] == "lunaroute"
+    # The MCP provider id must be declared or the host rejects the registration at runtime.
+    assert manifest["contributes"]["mcpServerDefinitionProviders"][0]["id"] == "lunaroute.mcp"
     notices = archive.read("extension/THIRD_PARTY_NOTICES.txt")
     root = Path(__file__).resolve().parent.parent
     for license_path in ["LICENSE", "src/_vendor/partial-json-parser/LICENSE", "src/internal/qs/LICENSE.md"]:

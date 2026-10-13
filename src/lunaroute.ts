@@ -65,6 +65,8 @@ export const capture: { directory?: string } = {};
 export const FRONT_URL = 'https://app.lunaroute.com';
 export const API_URL = 'https://api.lunaroute.com';
 export const ROUTING_URL = 'https://gw.lunaroute.com/v1';
+/** Hosted LunaRoute MCP server (Streamable HTTP) that native Agent mode can use through the host. */
+export const MCP_URL = 'https://mcp.lunaroute.com/mcp';
 export const LOGIN_TIMEOUT_MS = 900000;
 export const EXCHANGE_TIMEOUT_MS = 15000;
 export const CATALOG_TIMEOUT_MS = 10000;

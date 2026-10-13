@@ -91,6 +91,15 @@ Run **LunaRoute: Capture Chat Diagnostics (Preview)**, pick a folder, then send 
 
 Capture is opt-in and one-shot: it is not telemetry, nothing is uploaded, and the API key is never written (credentials stay in request headers, which are not captured). The files do contain your prompts, tool history and the model's response - review them before sharing.
 
+## MCP tools (native Agent mode)
+
+While you are signed in, the extension contributes LunaRoute's hosted MCP server (`https://mcp.lunaroute.com/mcp`) so native Agent mode can use those tools (web, image and document families) with no manual configuration.
+
+- VS Code owns the server lifecycle: enable or disable it in **MCP SERVERS - INSTALLED** (Extensions view) or via **MCP: List Servers**, and it asks before running a tool. The extension never executes tools itself.
+- Your organization's LunaRoute tool policies still apply server-side, so a tool disabled for your user or organization stays unavailable.
+- The extension stores nothing for the server: it hands VS Code a definition carrying your current key in request headers, re-resolved whenever credentials change. Signing out stops offering the server, and the key is never written to disk by this extension.
+- Header-authenticated MCP servers have known VS Code regressions; if the server reports unavailable, check **MCP: List Servers** output and report it rather than editing `mcp.json` by hand.
+
 ## Scope
 
 Chat + Agent only. No autocomplete, separate chat panel, automatic LunaRoute MCP registration, third-party extension configuration, background tool execution or automatic model preference changes.

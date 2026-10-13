@@ -54,6 +54,12 @@
         "displayName": "LunaRoute",
         "managementCommand": "lunaroute.manage"
       }
+    ],
+    "mcpServerDefinitionProviders": [
+      {
+        "id": "lunaroute.mcp",
+        "label": "LunaRoute"
+      }
     ]
   },
   "scripts": {

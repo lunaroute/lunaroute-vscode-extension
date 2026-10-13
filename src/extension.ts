@@ -3,7 +3,7 @@ import * as vscode from 'vscode';
 import { createAuthController, type AuthController } from './auth.js';
 import { Catalog } from './catalog.js';
 import { LunaRouteProvider } from './provider.js';
-import { capture, FRONT_URL, LunaRouteError, userMessage, type Attribution } from './lunaroute.js';
+import { buildHeaders, capture, FRONT_URL, LunaRouteError, MCP_URL, userMessage, type Attribution } from './lunaroute.js';
 
 let generation = 0;
 let runtime: { disposable: vscode.Disposable; attribution: Attribution } | undefined;
@@ -83,6 +83,34 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       } else await vscode.window.showErrorMessage(userMessage(error));
     }
   }
+  // The hosted LunaRoute MCP server, contributed so native Agent mode can use its tools. The host owns
+  // enabling the server, approving each tool and executing it; we only hand over a definition carrying
+  // the current key and re-resolve it when credentials change, so a rotated key takes effect.
+  const mcpChanged = new vscode.EventEmitter<void>();
+  const mcpDefinition = (key: string) => new vscode.McpHttpServerDefinition('LunaRoute', vscode.Uri.parse(MCP_URL),
+    buildHeaders(key, attribution), attribution.version);
+  // Optional capability: a registration failure must never fail activation or chat.
+  const registerMcp = () => vscode.lm.registerMcpServerDefinitionProvider('lunaroute.mcp', {
+    onDidChangeMcpServerDefinitions: mcpChanged.event,
+    // Called eagerly by the host and must not require interaction: offer the server only when a key is saved.
+    provideMcpServerDefinitions: async () => {
+      try {
+        const snapshot = (await getAuth()).snapshot();
+        return snapshot.connection ? [mcpDefinition(snapshot.connection.apiKey)] : [];
+      } catch { return []; }
+    },
+    // Called when the host starts the server: use the freshest key and never trigger sign-in from here.
+    resolveMcpServerDefinition: async () => {
+      try {
+        const connection = (await getAuth()).snapshot().connection;
+        return connection ? mcpDefinition(connection.apiKey) : undefined;
+      } catch { return undefined; }
+    },
+  });
+  try { resources.push(mcpChanged, registerMcp()); } catch { mcpChanged.dispose(); }
+  void getAuth().then(controller => {
+    if (live()) resources.push(controller.onDidChange(() => mcpChanged.fire()));
+  }, () => {});
   resources.push(
     // Preview diagnostics: raw request/response capture into a folder the user picks. Credentials are never written.
     vscode.commands.registerCommand('lunaroute.captureDiagnostics', async () => {
