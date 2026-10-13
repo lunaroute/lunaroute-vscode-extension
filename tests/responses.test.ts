@@ -102,8 +102,19 @@ it('rejects unrepresentable named messages, misplaced tool parts and over-budget
   }
   expect(() => buildResponsesRequest({ ...model, maxInputTokens: 32 }, [user('too big')], auto)).toThrow(LunaRouteError);
 });
-it('rejects unknown roles instead of inventing a public System role', () => {
-  expect(() => buildResponsesRequest(model, [{ role: 0 as vscode.LanguageModelChatMessageRole, content: [text('instruction')], name: undefined }], auto)).toThrow(LunaRouteError);
+it('accepts VS Code 1.141 System-role instructions from the native chat', () => {
+  const system = { role: 3 as vscode.LanguageModelChatMessageRole, name: undefined, content: [text('You are LunaRoute.')] };
+  const request = buildResponsesRequest(model, [system, user('hello world')], auto);
+  expect(request.input).toEqual([
+    { role: 'system', content: [{ type: 'input_text', text: 'You are LunaRoute.' }] },
+    { role: 'user', content: [{ type: 'input_text', text: 'hello world' }] },
+  ]);
+  expect(estimateTokens(system)).toBeGreaterThan(32);
+});
+it('rejects roles the host cannot deliver instead of guessing a mapping', () => {
+  for (const role of [0, 4]) {
+    expect(() => buildResponsesRequest(model, [{ role: role as vscode.LanguageModelChatMessageRole, content: [text('instruction')], name: undefined }], auto)).toThrow(LunaRouteError);
+  }
 });
 it.each([
   { value: 'opaque instructions' },

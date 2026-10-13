@@ -66,10 +66,15 @@ function leafInput(part: Leaf, model: vscode.LanguageModelChatInformation): Open
   return { type: 'input_image', detail: 'auto', image_url: `data:${part.image.mimeType};base64,${Buffer.from(part.image.data).toString('base64')}` };
 }
 
+// VS Code 1.141 delivers native-chat instructions as LanguageModelChatMessageRole.System
+// (role 3); @types/vscode@1.140 predates that member, so the value is named here.
+const SYSTEM_ROLE = 3 as vscode.LanguageModelChatMessageRole;
+
 // Counting uses the same validation without allocating image data URLs.
 function messageInput(message: vscode.LanguageModelChatRequestMessage, model?: vscode.LanguageModelChatInformation) {
   const role = message.role === vscode.LanguageModelChatMessageRole.User ? 'user'
-    : message.role === vscode.LanguageModelChatMessageRole.Assistant ? 'assistant' : undefined;
+    : message.role === vscode.LanguageModelChatMessageRole.Assistant ? 'assistant'
+    : message.role === SYSTEM_ROLE ? 'system' : undefined;
   if (!role || !Array.isArray(message.content) || (message.name !== undefined && message.name !== '')) throw inputError();
   const items: OpenAI.Responses.ResponseInput = [];
   let content: OpenAI.Responses.ResponseInputMessageContentList = [];
