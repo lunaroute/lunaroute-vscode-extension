@@ -22,16 +22,38 @@
   "extensionKind": [
     "ui"
   ],
-  "activationEvents": ["onStartupFinished"],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
   "contributes": {
     "commands": [
-      { "command": "lunaroute.signIn", "title": "LunaRoute: Sign In" },
-      { "command": "lunaroute.signOut", "title": "LunaRoute: Sign Out" },
-      { "command": "lunaroute.manage", "title": "LunaRoute: Manage" },
-      { "command": "lunaroute.refreshModels", "title": "LunaRoute: Refresh Models" }
+      {
+        "command": "lunaroute.signIn",
+        "title": "LunaRoute: Sign In"
+      },
+      {
+        "command": "lunaroute.signOut",
+        "title": "LunaRoute: Sign Out"
+      },
+      {
+        "command": "lunaroute.manage",
+        "title": "LunaRoute: Manage"
+      },
+      {
+        "command": "lunaroute.refreshModels",
+        "title": "LunaRoute: Refresh Models"
+      },
+      {
+        "command": "lunaroute.captureDiagnostics",
+        "title": "LunaRoute: Capture Chat Diagnostics (Preview)"
+      }
     ],
     "languageModelChatProviders": [
-      { "vendor": "lunaroute", "displayName": "LunaRoute", "managementCommand": "lunaroute.manage" }
+      {
+        "vendor": "lunaroute",
+        "displayName": "LunaRoute",
+        "managementCommand": "lunaroute.manage"
+      }
     ]
   },
   "scripts": {

@@ -80,6 +80,17 @@ These are **VS Code** controls, not LunaRoute configuration. The extension never
 | Storage / incomplete cleanup | Repair secure storage and retry Sign Out; a cancelled sign-in may still have a saved key. Revoke unused keys in the dashboard. |
 | Unsupported / oversized history | Reduce input or start a new chat. Report native compatibility failures rather than dropping required history. |
 
+## Preview diagnostics
+
+Run **LunaRoute: Capture Chat Diagnostics (Preview)**, pick a folder, then send one chat message. The extension writes that exchange there:
+
+- `<stamp>-request.json` - the exact stateless request sent to LunaRoute
+- `<stamp>-response.meta.json` - endpoint, status and response headers
+- `<stamp>-response.sse` - the raw event stream returned by the gateway
+- `<stamp>-error.txt` - safe failure metadata (kind, status, protocol detail) when the exchange fails
+
+Capture is opt-in and one-shot: it is not telemetry, nothing is uploaded, and the API key is never written (credentials stay in request headers, which are not captured). The files do contain your prompts, tool history and the model's response - review them before sharing.
+
 ## Scope
 
 Chat + Agent only. No autocomplete, separate chat panel, automatic LunaRoute MCP registration, third-party extension configuration, background tool execution or automatic model preference changes.

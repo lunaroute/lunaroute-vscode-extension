@@ -86,8 +86,11 @@ export const workspace = { getConfiguration(section = '') {
 } };
 export const notices = { information: [] as string[], errors: [] as string[], nextPick: undefined as string | undefined,
   picks: [] as { items: readonly { label: string }[]; options: unknown }[] };
+export const pickedFolders: { fsPath: string }[] = [];
 export const window = {
   async showInformationMessage(message: string) { notices.information.push(message); },
+  async showWarningMessage(message: string) { notices.information.push(message); },
+  async showOpenDialog() { return pickedFolders; },
   async showErrorMessage(message: string) { notices.errors.push(message); },
   async showQuickPick<T extends { label: string }>(items: readonly T[], options?: unknown) {
     notices.picks.push({ items, options });

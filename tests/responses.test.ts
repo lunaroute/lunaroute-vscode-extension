@@ -1,8 +1,11 @@
 import type { IncomingHttpHeaders, RequestListener, ServerResponse } from 'node:http';
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
 import * as vscode from 'vscode';
 import { buildResponsesRequest, estimateTokens, streamResponse } from '../src/responses.js';
-import { LunaRouteError, userMessage } from '../src/lunaroute.js';
+import { capture, LunaRouteError, userMessage } from '../src/lunaroute.js';
 import { deferred } from './vscode.js';
 import { startGatewayFixture, writeSse } from './fixtures/responses-sse.js';
 
@@ -26,6 +29,7 @@ const probe = 'private_probe_prompt_or_tool_content';
 const fixtures: Awaited<ReturnType<typeof startGatewayFixture>>[] = [];
 afterEach(async () => {
   for (const fixture of fixtures.splice(0)) await fixture.close();
+  capture.directory = undefined;
   vi.useRealTimers();
   vi.unstubAllEnvs();
 });
@@ -439,6 +443,46 @@ it('fails closed when terminal text contradicts what was streamed', async () => 
     complete([messageItem('HELLO')])]);
   const result = await collect(streamResponse(key, request(), attribution, new AbortController().signal, f.baseURL));
   expect(userMessage(result.error)).toContain('unsupported');
+});
+it('captures the exact request and response for preview diagnostics without credentials', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'lunaroute-capture-'));
+  try {
+    const f = await service([...textStart, ...textEnd]);
+    capture.directory = directory;
+    const result = await collect(streamResponse(key, request(), attribution, new AbortController().signal, f.baseURL));
+    expect(result.error).toBeUndefined();
+    const files = readdirSync(directory).sort();
+    expect(files.some(name => name.endsWith('-request.json'))).toBe(true);
+    expect(files.some(name => name.endsWith('-response.meta.json'))).toBe(true);
+    expect(files.some(name => name.endsWith('-response.sse'))).toBe(true);
+    const saved = files.map(name => readFileSync(join(directory, name), 'utf8')).join('\n');
+    expect(saved).toContain('"model":"chat-a"');
+    expect(saved).toContain('response.completed');
+    expect(saved).not.toContain(key);
+    expect(saved.toLowerCase()).not.toContain('authorization');
+    expect(capture.directory).toBeUndefined();
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+it('records only safe metadata when a captured exchange fails', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'lunaroute-capture-fail-'));
+  try {
+    const f = await service([...textStart, event('response.future_kind.added', { item_id: 'msg_1' })]);
+    capture.directory = directory;
+    const result = await collect(streamResponse(key, request(), attribution, new AbortController().signal, f.baseURL));
+    expect(result.error).toBeInstanceOf(LunaRouteError);
+    const saved = readdirSync(directory).filter(name => name.endsWith('-error.txt')).map(name => readFileSync(join(directory, name), 'utf8')).join('\n');
+    expect(saved).toContain('protocol');
+    expect(saved).toContain('response.future_kind.added');
+    expect(saved).not.toContain(probe);
+    expect(capture.directory).toBeUndefined();
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+it('treats the completed response as authoritative for terminal item status', async () => {
+  const f = await service([...textStart, event('response.output_item.done', { output_index: 0, item: messageItem('hello') }),
+    complete([{ ...messageItem('hello'), status: 'in_progress' }])]);
+  const result = await collect(streamResponse(key, request(), attribution, new AbortController().signal, f.baseURL));
+  expect(result.error).toBeUndefined();
+  expect(result.parts).toEqual([text('hello')]);
 });
 it('validates real reasoning content/summary fragments without rendering them as answer text', async () => {
   const item = { ...reasoning, encrypted_content: null,

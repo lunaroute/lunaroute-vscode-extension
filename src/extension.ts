@@ -3,7 +3,7 @@ import * as vscode from 'vscode';
 import { createAuthController, type AuthController } from './auth.js';
 import { Catalog } from './catalog.js';
 import { LunaRouteProvider } from './provider.js';
-import { FRONT_URL, LunaRouteError, userMessage, type Attribution } from './lunaroute.js';
+import { capture, FRONT_URL, LunaRouteError, userMessage, type Attribution } from './lunaroute.js';
 
 let generation = 0;
 let runtime: { disposable: vscode.Disposable; attribution: Attribution } | undefined;
@@ -84,6 +84,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }
   }
   resources.push(
+    // Preview diagnostics: raw request/response capture into a folder the user picks. Credentials are never written.
+    vscode.commands.registerCommand('lunaroute.captureDiagnostics', async () => {
+      const picked = await vscode.window.showOpenDialog({ canSelectFolders: true, canSelectFiles: false, openLabel: 'Capture LunaRoute diagnostics here' });
+      const directory = picked?.[0]?.fsPath;
+      if (!directory) return;
+      capture.directory = directory;
+      void vscode.window.showInformationMessage(`LunaRoute diagnostics armed: send one chat message and the raw request and response will be written to ${directory}.`);
+    }),
     vscode.commands.registerCommand('lunaroute.signIn', () => run(
       () => vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'LunaRoute: Sign In', cancellable: true },
         async (_progress, token) => (await getAuth()).signIn(token)),

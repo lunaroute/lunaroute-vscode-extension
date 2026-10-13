@@ -23,7 +23,7 @@ afterEach(() => {
 it('silently activates with native commands and no credential-bearing exports', async () => {
   const exported = await activate(context());
   expect(exported).toBeUndefined();
-  expect([...commandHandlers.keys()].sort()).toEqual(['lunaroute.manage', 'lunaroute.refreshModels', 'lunaroute.signIn', 'lunaroute.signOut']);
+  expect([...commandHandlers.keys()].sort()).toEqual(['lunaroute.captureDiagnostics', 'lunaroute.manage', 'lunaroute.refreshModels', 'lunaroute.signIn', 'lunaroute.signOut']);
   expect(registeredProviders.has('lunaroute')).toBe(true);
   expect(env.openExternal).not.toHaveBeenCalled();
   expect(notices.information).toEqual([]);

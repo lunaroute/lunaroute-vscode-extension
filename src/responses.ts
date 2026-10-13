@@ -1,7 +1,9 @@
 import { isDeepStrictEqual } from 'node:util';
+import { join } from 'node:path';
+import { appendFileSync, writeFileSync } from 'node:fs';
 import * as vscode from 'vscode';
 import OpenAI from 'openai';
-import { abortReason, buildHeaders, httpError, LunaRouteError, ROUTING_URL, type Attribution } from './lunaroute.js';
+import { abortReason, buildHeaders, capture, httpError, LunaRouteError, ROUTING_URL, type Attribution } from './lunaroute.js';
 
 const REPLAY_MIME = 'application/vnd.lunaroute.responses-replay+json';
 const IMAGE_MIMES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
@@ -140,6 +142,14 @@ export function estimateTokens(input: string | vscode.LanguageModelChatRequestMe
   try { return typeof input === 'string' ? bytes(input) : messageInput(input).tokens; } catch { throw inputError(); }
 }
 const STREAM_IDLE_MS = 120000;
+// Preview diagnostics: raw request/response capture into the folder the user picked (opt-in). The
+// files contain the conversation; credentials live in request headers and are never written.
+function captureWrite(directory: string, name: string, value: string | Uint8Array) {
+  try { if (typeof value === 'string') writeFileSync(join(directory, name), value); else appendFileSync(join(directory, name), value); }
+  catch (error) {
+    void vscode.window.showWarningMessage(`LunaRoute diagnostics capture failed: ${error instanceof Error ? error.message : 'unknown error'}`);
+  }
+}
 const protocolError = (detail?: string) => new LunaRouteError('protocol', undefined, undefined, detail);
 const indexValue = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
 type StreamItem = { index: number; item: Record<string, unknown>; args: string; complete?: Record<string, unknown>;
@@ -150,6 +160,9 @@ export async function* streamResponse(key: string, request: OpenAI.Responses.Res
   attribution: Attribution, signal: AbortSignal, baseURL = ROUTING_URL): AsyncGenerator<vscode.LanguageModelResponsePart> {
   const controller = new AbortController();
   const combined = AbortSignal.any([signal, controller.signal]);
+  const directory = capture.directory;
+  const stamp = directory ? new Date().toISOString().replace(/[:.]/g, '-') : '';
+  let captured = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let terminal = false;
   let closed = false;
@@ -164,13 +177,21 @@ export async function* streamResponse(key: string, request: OpenAI.Responses.Res
     const client = new OpenAI({ apiKey: key, baseURL, organization: null, project: null, adminAPIKey: null, webhookSecret: null,
       maxRetries: 0, logLevel: 'off', timeout: STREAM_IDLE_MS,
       fetch: async (url, init) => {
+        if (directory) {
+          const payload = typeof init?.body === 'string' ? init.body
+            : init?.body instanceof Uint8Array ? decoder.decode(init.body) : '';
+          captureWrite(directory, `${stamp}-request.json`, payload);
+          captured = true;
+        }
         const response = await fetch(url, { ...init, redirect: 'error', headers: {
           ...buildHeaders(key, attribution), 'Content-Type': 'application/json', Accept: 'text/event-stream',
         } });
         touch();
         if (!response.body) return response;
+        if (directory) captureWrite(directory, `${stamp}-response.meta.json`,
+          `${JSON.stringify({ url: String(url), status: response.status, headers: [...response.headers] }, null, 2)}\n`);
         const body = response.body.pipeThrough(new TransformStream<Uint8Array, Uint8Array>({
-          transform(chunk, output) { touch(); output.enqueue(chunk); },
+          transform(chunk, output) { touch(); if (directory) captureWrite(directory, `${stamp}-response.sse`, chunk); output.enqueue(chunk); },
         }), { signal: combined });
         return new Response(body, { status: response.status, statusText: response.statusText, headers: response.headers });
       },
@@ -240,12 +261,19 @@ export async function* streamResponse(key: string, request: OpenAI.Responses.Res
       state.reasoning.set(key, { field, index, value: next });
       if (state.complete) validateReasoningFragments(state, state.complete);
     };
-    // Terminal snapshots may regenerate item ids (vLLM/ollama rebuild response.completed from the
-    // parsed output), so consistency compares every other field and leaves identity alone.
-    const sameItem = (a: Record<string, unknown>, b: Record<string, unknown>) =>
-      isDeepStrictEqual({ ...a, id: undefined }, { ...b, id: undefined });
     const snapshotParts = (state: StreamItem, item: Record<string, unknown>, final: boolean): vscode.LanguageModelResponsePart[] => {
-      if (item.status !== undefined && item.status !== 'completed') throw protocolError('snapshot:status');
+      // The completed response is authoritative for its own items: providers rebuild the terminal
+      // snapshot and may leave per-item status behind (vllm/ollama); stream-level events stay strict.
+      if (!final && item.status !== undefined && item.status !== 'completed') throw protocolError('snapshot:status');
+      // Terminal snapshots may regenerate item ids and carry leftover status, so consistency ignores
+      // identity always, and per-item status in the terminal pass where the response status governs.
+      const normalize = (value: Record<string, unknown>) => {
+        const copy = { ...value };
+        delete copy.id;
+        if (final) delete copy.status;
+        return copy;
+      };
+      const agrees = (value: Record<string, unknown>) => isDeepStrictEqual(normalize(state.complete as Record<string, unknown>), normalize(value));
       const parts: vscode.LanguageModelResponsePart[] = [];
       if (item.type === 'function_call') {
         if (typeof item.arguments !== 'string' || !item.arguments.startsWith(state.args)
@@ -255,7 +283,7 @@ export async function* streamResponse(key: string, request: OpenAI.Responses.Res
         if (!validReasoning(item)) throw protocolError('snapshot:reasoning');
         // The SDK contract makes the done item authoritative for encrypted replay.
         if (final && state.complete) item = state.complete;
-        else if (state.complete && !sameItem(state.complete, item)) throw protocolError('snapshot:reasoning');
+        else if (state.complete && !agrees(item)) throw protocolError('snapshot:reasoning');
         validateReasoningFragments(state, item);
       } else {
         if (!Array.isArray(item.content)) throw protocolError('snapshot:message');
@@ -273,7 +301,7 @@ export async function* streamResponse(key: string, request: OpenAI.Responses.Res
           state.text.set(index, { type: part.type as string, value });
         }
         if ([...state.text.keys()].some(index => index >= (item.content as unknown[]).length)) throw protocolError('snapshot:part');
-        if (state.complete && !sameItem(state.complete, item)) throw protocolError('snapshot:message');
+        if (state.complete && !agrees(item)) throw protocolError('snapshot:message');
       }
       state.complete = item;
       return parts;
@@ -447,6 +475,10 @@ export async function* streamResponse(key: string, request: OpenAI.Responses.Res
     if (combined.aborted) throw abortReason(combined);
     throw protocolError('stream:ended');
   } catch (error) {
+    if (directory && error instanceof LunaRouteError) {
+      captureWrite(directory, `${stamp}-error.txt`,
+        `${error.kind}${error.status === undefined ? '' : ` ${error.status}`}${error.detail ? ` ${error.detail}` : ''}\n`);
+    }
     if (combined.aborted) throw abortReason(combined);
     if (terminal) return;
     if (error instanceof LunaRouteError) throw error;
@@ -458,6 +490,10 @@ export async function* streamResponse(key: string, request: OpenAI.Responses.Res
     throw protocolError();
   } finally {
     closed = true;
+    if (directory) {
+      capture.directory = undefined;
+      if (captured) void vscode.window.showInformationMessage(`LunaRoute diagnostics saved in ${directory}. The files contain your prompts and the model response - review them before sharing.`);
+    }
     clearTimeout(timer);
     controller.abort(new LunaRouteError('cancelled'));
   }

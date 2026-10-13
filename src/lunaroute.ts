@@ -60,6 +60,8 @@ export function userMessage(error: unknown): string {
   if (error.kind === 'protocol' && error.detail) return `${messages[error.kind]} (${error.detail})`;
   return messages[error.kind];
 }
+/** One-shot local capture target for preview diagnostics; set by the capture command, never holds credentials. */
+export const capture: { directory?: string } = {};
 export const FRONT_URL = 'https://app.lunaroute.com';
 export const API_URL = 'https://api.lunaroute.com';
 export const ROUTING_URL = 'https://gw.lunaroute.com/v1';
