@@ -16,6 +16,15 @@ async function collect(response: vscode.LanguageModelChatResponse) {
   }
   return parts;
 }
+async function waitForModels(count: number) {
+  // The broker updates its model list asynchronously after the provider fires its change event.
+  for (const deadline = Date.now() + 10_000; Date.now() < deadline;) {
+    const models = await vscode.lm.selectChatModels({ vendor: 'lunaroute-probe' });
+    if (models.length === count) return models;
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  return vscode.lm.selectChatModels({ vendor: 'lunaroute-probe' });
+}
 async function commandAndDismiss(name: string) {
   // Notifications/quick-picks have no public lifecycle event; drive their public close commands until this command settles.
   const timer = setInterval(() => {
@@ -119,7 +128,7 @@ export async function run(): Promise<void> {
     const subscription = vscode.lm.onDidChangeChatModels(() => { modelEvents++; });
     try {
       await probe.addModel();
-      assert.equal((await vscode.lm.selectChatModels({ vendor: 'lunaroute-probe' })).length, 2);
+      assert.equal((await waitForModels(2)).length, 2);
       await probe.signOut();
       assert.deepEqual(await vscode.lm.selectChatModels({ vendor: 'lunaroute-probe' }), []);
       assert.ok(modelEvents > 0, 'The host reports model changes');
