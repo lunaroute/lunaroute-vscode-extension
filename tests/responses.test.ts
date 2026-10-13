@@ -208,12 +208,12 @@ it('names the offending event on an unsupported stream without leaking content',
   expect(userMessage(error)).toContain('event:response.future_event');
   expect(userMessage(error)).not.toContain(probe);
 });
-it('names the diverging snapshot before failing the completion check', async () => {
+it('names the diverging streamed snapshot and the event that carried it', async () => {
   const f = await service([...textStart, event('response.output_item.done', { output_index: 0, item: messageItem('hello') }),
-    complete([{ ...messageItem('hello'), logprobs: [] }])]);
+    event('response.output_item.done', { output_index: 0, item: messageItem('hello!') })]);
   const { error } = await collect(streamResponse(key, request(), attribution, new AbortController().signal, f.baseURL));
   expect(userMessage(error)).toContain('snapshot:message');
-  expect(userMessage(error)).toContain('response.completed');
+  expect(userMessage(error)).toContain('response.output_item.done');
 });
 it('streams text before terminal completion through the real SDK and sends exactly one stateless attributed POST', async () => {
   const gate = deferred<void>();
@@ -483,6 +483,34 @@ it('treats the completed response as authoritative for terminal item status', as
   const result = await collect(streamResponse(key, request(), attribution, new AbortController().signal, f.baseURL));
   expect(result.error).toBeUndefined();
   expect(result.parts).toEqual([text('hello')]);
+});
+it('accepts the real terminal snapshot shape: null reasoning status, regenerated ids and dropped fields', async () => {
+  // Shapes copied from a captured production stream (sglang-style serving behind the gateway).
+  const reasoningDone = { ...reasoning, encrypted_content: null,
+    content: [{ type: 'reasoning_text', text: 'hidden reasoning' }] };
+  const f = await service([
+    event('response.output_item.added', { output_index: 0, item: { ...reasoning, encrypted_content: null, status: 'in_progress' } }),
+    event('response.reasoning_part.added', { output_index: 0, item_id: 'rs_1', content_index: 0 }),
+    event('response.reasoning_text.delta', { output_index: 0, item_id: 'rs_1', content_index: 0, delta: 'hidden reasoning' }),
+    event('response.reasoning_text.done', { output_index: 0, item_id: 'rs_1', content_index: 0, text: 'hidden reasoning' }),
+    event('response.reasoning_part.done', { output_index: 0, item_id: 'rs_1', content_index: 0 }),
+    event('response.output_item.done', { output_index: 0, item: reasoningDone }),
+    event('response.output_item.added', { output_index: 1, item: { id: 'msg_1', type: 'message', role: 'assistant', status: 'in_progress', phase: null, content: [] } }),
+    event('response.output_text.delta', { output_index: 1, item_id: 'msg_1', content_index: 0, delta: 'hello' }),
+    event('response.output_item.done', { output_index: 1, item: { ...messageItem('hello'), summary: [] } }),
+    complete([{ ...reasoningDone, id: 'b7a8138c4e7d4442999', status: null },
+      { ...messageItem('hello'), id: 'beaab13cc314f72e999' }]),
+  ]);
+  const result = await collect(streamResponse(key, request(), attribution, new AbortController().signal, f.baseURL));
+  expect(result.error).toBeUndefined();
+  expect(result.parts.filter(part => part instanceof vscode.LanguageModelTextPart)).toEqual([text('hello')]);
+  expect(result.parts.filter(part => part instanceof vscode.LanguageModelDataPart)).toHaveLength(1);
+});
+it('still rejects a streamed item that contradicts an earlier streamed snapshot', async () => {
+  const f = await service([...textStart, event('response.output_item.done', { output_index: 0, item: messageItem('hello') }),
+    event('response.output_item.done', { output_index: 0, item: messageItem('hello!') }), complete([messageItem('hello!')])]);
+  const result = await collect(streamResponse(key, request(), attribution, new AbortController().signal, f.baseURL));
+  expect(userMessage(result.error)).toContain('snapshot:message');
 });
 it('validates real reasoning content/summary fragments without rendering them as answer text', async () => {
   const item = { ...reasoning, encrypted_content: null,

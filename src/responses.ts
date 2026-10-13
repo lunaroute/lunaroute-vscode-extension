@@ -40,7 +40,8 @@ function validReasoning(value: unknown): value is OpenAI.Responses.ResponseReaso
   return segments(value.summary, 'summary_text')
     && (value.content === undefined || segments(value.content, 'reasoning_text'))
     && (value.encrypted_content === undefined || value.encrypted_content === null || typeof value.encrypted_content === 'string')
-    && (value.status === undefined || value.status === 'completed');
+    // JSON null means unspecified, matching the gateway's absent-field convention (kata nhz1).
+    && (value.status === undefined || value.status === null || value.status === 'completed');
 }
 function replayItem(part: vscode.LanguageModelDataPart, role: vscode.LanguageModelChatMessageRole, modelId?: string) {
   if (role !== vscode.LanguageModelChatMessageRole.Assistant) throw inputError();
@@ -265,15 +266,12 @@ export async function* streamResponse(key: string, request: OpenAI.Responses.Res
       // The completed response is authoritative for its own items: providers rebuild the terminal
       // snapshot and may leave per-item status behind (vllm/ollama); stream-level events stay strict.
       if (!final && item.status !== undefined && item.status !== 'completed') throw protocolError('snapshot:status');
-      // Terminal snapshots may regenerate item ids and carry leftover status, so consistency ignores
-      // identity always, and per-item status in the terminal pass where the response status governs.
-      const normalize = (value: Record<string, unknown>) => {
-        const copy = { ...value };
-        delete copy.id;
-        if (final) delete copy.status;
-        return copy;
-      };
-      const agrees = (value: Record<string, unknown>) => isDeepStrictEqual(normalize(state.complete as Record<string, unknown>), normalize(value));
+    // Terminal snapshots are authoritative and providers rebuild them: item ids get regenerated
+    // (vllm#59834/#59307), per-item status is left behind, and fields such as an empty `summary`
+    // appear or disappear (verified against a real sglang-style stream). Content consistency is
+    // still enforced below by the prefix/fragment rules, which is what protects the user.
+    const sameItem = (value: Record<string, unknown>) =>
+      isDeepStrictEqual({ ...state.complete, id: undefined }, { ...value, id: undefined });
       const parts: vscode.LanguageModelResponsePart[] = [];
       if (item.type === 'function_call') {
         if (typeof item.arguments !== 'string' || !item.arguments.startsWith(state.args)
@@ -283,7 +281,7 @@ export async function* streamResponse(key: string, request: OpenAI.Responses.Res
         if (!validReasoning(item)) throw protocolError('snapshot:reasoning');
         // The SDK contract makes the done item authoritative for encrypted replay.
         if (final && state.complete) item = state.complete;
-        else if (state.complete && !agrees(item)) throw protocolError('snapshot:reasoning');
+        else if (state.complete && !sameItem(item)) throw protocolError('snapshot:reasoning');
         validateReasoningFragments(state, item);
       } else {
         if (!Array.isArray(item.content)) throw protocolError('snapshot:message');
@@ -301,7 +299,8 @@ export async function* streamResponse(key: string, request: OpenAI.Responses.Res
           state.text.set(index, { type: part.type as string, value });
         }
         if ([...state.text.keys()].some(index => index >= (item.content as unknown[]).length)) throw protocolError('snapshot:part');
-        if (state.complete && !agrees(item)) throw protocolError('snapshot:message');
+        // Only streamed snapshots must agree field-for-field; the terminal item is the authority.
+        if (state.complete && !final && !sameItem(item)) throw protocolError('snapshot:message');
       }
       state.complete = item;
       return parts;
