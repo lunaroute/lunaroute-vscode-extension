@@ -1,5 +1,7 @@
 # LunaRoute for VS Code
 
+<img src="icon.png" alt="LunaRoute" width="128">
+
 LunaRoute models in native VS Code Chat and Agent mode, with browser sign-in instead of copying API keys.
 
 [Source](https://github.com/lunaroute/lunaroute-vscode-extension) · [Build and test](https://github.com/lunaroute/lunaroute-vscode-extension/actions/workflows/check.yml)

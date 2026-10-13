@@ -1,6 +1,7 @@
 **
 !package.json
 !README.md
+!icon.png
 !LICENSE
 !THIRD_PARTY_NOTICES.txt
 !dist/extension.cjs
