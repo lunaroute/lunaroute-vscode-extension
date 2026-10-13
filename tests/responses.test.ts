@@ -315,10 +315,9 @@ it('keeps completed reasoning before subsequent answer text in replay history', 
   expect(buildResponsesRequest(model, [new vscode.LanguageModelChatMessage(vscode.LanguageModelChatMessageRole.Assistant, result.parts)], auto).input)
     .toEqual([reasoning, { role: 'assistant', content: [{ type: 'input_text', text: 'hello' }] }]);
 });
-it.each(['response.failed', 'response.incomplete', 'empty', 'empty-message', 'phase', 'unknown-tool'])('fails closed for %s without tool activity', async failure => {
+it.each(['response.failed', 'response.incomplete', 'empty', 'empty-message', 'phase'])('fails closed for %s without tool activity', async failure => {
   const output = failure === 'phase' ? [{ ...messageItem('hello'), phase: 'commentary' }]
-    : failure === 'empty-message' ? [messageItem('')]
-    : failure === 'unknown-tool' ? [{ ...toolItem('fc_bad', 'bad'), name: 'not_offered' }] : [];
+    : failure === 'empty-message' ? [messageItem('')] : [];
   const f = await service(failure.startsWith('response.')
     ? [event(failure, { response: { status: failure.slice(9), error: { message: probe } } })] : [complete(output)]);
   const result = await collect(streamResponse(key, request(), attribution, new AbortController().signal, f.baseURL));
@@ -511,6 +510,30 @@ it('still rejects a streamed item that contradicts an earlier streamed snapshot'
     event('response.output_item.done', { output_index: 0, item: messageItem('hello!') }), complete([messageItem('hello!')])]);
   const result = await collect(streamResponse(key, request(), attribution, new AbortController().signal, f.baseURL));
   expect(userMessage(result.error)).toContain('snapshot:message');
+});
+it.each(['streamed', 'terminal-only'] as const)('passes through a %s call for a tool the host never offered so the host can answer the model', async mode => {
+  // VS Code owns tool execution: an unknown name is answered to the model as a failed tool result,
+  // which is how a chat recovers. Only malformed or duplicated calls remain fatal.
+  const hallucinated = { id: 'fc_1', call_id: 'call-1', type: 'function_call', name: 'run_in_terminal', arguments: '{"command":"ls"}', status: 'completed' };
+  const f = await service(mode === 'streamed' ? [
+    event('response.output_item.added', { output_index: 0, item: { ...hallucinated, arguments: '', status: 'in_progress' } }),
+    event('response.function_call_arguments.delta', { output_index: 0, item_id: 'fc_1', delta: '{"command":"ls"}' }),
+    event('response.output_item.done', { output_index: 0, item: hallucinated }),
+    complete([hallucinated]),
+  ] : [complete([hallucinated])]);
+  const result = await collect(streamResponse(key, request(), attribution, new AbortController().signal, f.baseURL));
+  expect(result.error).toBeUndefined();
+  expect(result.parts).toEqual([new vscode.LanguageModelToolCallPart('call-1', 'run_in_terminal', { command: 'ls' })]);
+});
+it('still rejects a completed call whose arguments are not a JSON object', async () => {
+  const broken = { id: 'fc_1', call_id: 'call-1', type: 'function_call', name: 'read_file', arguments: 'not-json', status: 'completed' };
+  const f = await service([
+    event('response.output_item.added', { output_index: 0, item: { ...broken, arguments: '' } }),
+    event('response.output_item.done', { output_index: 0, item: broken }),
+    complete([broken]),
+  ]);
+  const result = await collect(streamResponse(key, request(), attribution, new AbortController().signal, f.baseURL));
+  expect(userMessage(result.error)).toContain('completed:tool');
 });
 it('validates real reasoning content/summary fragments without rendering them as answer text', async () => {
   const item = { ...reasoning, encrypted_content: null,

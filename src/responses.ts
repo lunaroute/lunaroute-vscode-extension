@@ -199,7 +199,6 @@ export async function* streamResponse(key: string, request: OpenAI.Responses.Res
     });
     const items = new Map<string, StreamItem>();
     const positions = new Map<number, string>();
-    const allowedTools = new Set(request.tools?.filter(tool => tool.type === 'function').map(tool => tool.name));
     let lastImmediateIndex = -1;
     const itemKind = (item: unknown): string => {
       const kind = record(item) && typeof item.type === 'string' ? item.type : 'malformed';
@@ -305,9 +304,11 @@ export async function* streamResponse(key: string, request: OpenAI.Responses.Res
       state.complete = item;
       return parts;
     };
+    // Calls for tools the host never offered are passed through: the host answers the model that the
+    // tool does not exist, which is how a normal chat recovers from a hallucinated call.
     const completeTool = (state: StreamItem) => {
       const item = state.complete;
-      if (!item || !identity(item.call_id) || !identity(item.name) || !allowedTools.has(item.name)) throw protocolError('completed:tool');
+      if (!item || !identity(item.call_id) || !identity(item.name)) throw protocolError('completed:tool');
       let input: unknown;
       try { input = JSON.parse(state.args); if (!record(input)) throw protocolError('completed:tool'); json(input); } catch { throw protocolError('completed:tool'); }
       return new vscode.LanguageModelToolCallPart(item.call_id, item.name, input);
