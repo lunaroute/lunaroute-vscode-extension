@@ -403,7 +403,13 @@ export async function* streamResponse(key: string, request: OpenAI.Responses.Res
           break;
         }
         case 'response.created': case 'response.queued': case 'response.in_progress': break;
-        default: throw protocolError();
+        // Provider reasoning bookkeeping (e.g. reasoning_part.added/done): reasoning is never rendered
+        // as answer text and the completed item is authoritative for the encrypted replay, so these
+        // events carry nothing we could drop or mis-render.
+        case 'response.reasoning_part.added': case 'response.reasoning_part.done': break;
+        default:
+          if (event.type.startsWith('response.reasoning_')) break;
+          throw protocolError();
         }
       } catch (error) {
         // Name the event that rejected the stream; detail never carries content.

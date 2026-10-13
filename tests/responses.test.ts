@@ -395,6 +395,24 @@ it('waits for earlier messages before publishing ready reasoning, then preserves
   expect(result.parts).toEqual([text('hello'), replay(), text('later')]);
 });
 
+it('tolerates provider reasoning-part bookkeeping events that never carry answer text', async () => {
+  const item = { ...reasoning, encrypted_content: null, content: [{ type: 'reasoning_text', text: 'hidden reasoning' }] };
+  const f = await service([
+    event('response.output_item.added', { output_index: 0, item: { ...reasoning, encrypted_content: null, status: 'in_progress' } }),
+    event('response.reasoning_part.added', { output_index: 0, item_id: 'rs_1', content_index: 0, part: { type: 'reasoning_text', text: '' } }),
+    event('response.reasoning_part.done', { output_index: 0, item_id: 'rs_1', content_index: 0, part: { type: 'reasoning_text', text: 'hidden reasoning' } }),
+    event('response.output_item.done', { output_index: 0, item }), complete([item]),
+  ]);
+  const result = await collect(streamResponse(key, request(), attribution, new AbortController().signal, f.baseURL));
+  expect(result.error).toBeUndefined();
+  expect(result.parts).toHaveLength(1);
+  expect(JSON.parse(new TextDecoder().decode((result.parts[0] as vscode.LanguageModelDataPart).data))).toEqual({ modelId: 'chat-a', item });
+});
+it('still fails closed on unknown non-reasoning events and names them', async () => {
+  const f = await service([...textStart, event('response.future_kind.added', { item_id: 'msg_1' })]);
+  const { error } = await collect(streamResponse(key, request(), attribution, new AbortController().signal, f.baseURL));
+  expect(userMessage(error)).toContain('event:response.future_kind.added');
+});
 it('validates real reasoning content/summary fragments without rendering them as answer text', async () => {
   const item = { ...reasoning, encrypted_content: null,
     content: [{ type: 'reasoning_text', text: 'hidden reasoning' }], summary: [{ type: 'summary_text', text: 'summary' }] };
