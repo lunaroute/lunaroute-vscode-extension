@@ -179,24 +179,29 @@ export async function* streamResponse(key: string, request: OpenAI.Responses.Res
     const positions = new Map<number, string>();
     const allowedTools = new Set(request.tools?.filter(tool => tool.type === 'function').map(tool => tool.name));
     let lastImmediateIndex = -1;
-    const stateFor = (item: unknown, index: unknown): StreamItem => {
+    const itemKind = (item: unknown): string => {
       const kind = record(item) && typeof item.type === 'string' ? item.type : 'malformed';
-      if (!record(item) || !identity(item.id) || !indexValue(index)
-        || !['message', 'function_call', 'reasoning'].includes(kind)) throw protocolError(`item:${kind}`);
+      if (!record(item) || !identity(item.id) || !['message', 'function_call', 'reasoning'].includes(kind)) throw protocolError(`item:${kind}`);
       if (item.type === 'message' && (item.role !== 'assistant' || (item.phase !== undefined && item.phase !== null))) throw protocolError('item:message');
       if (item.type === 'function_call' && (!identity(item.call_id) || !identity(item.name) || typeof item.arguments !== 'string'
         || item.async === true || item.namespace || (item.caller !== undefined && (!record(item.caller) || item.caller.type !== 'direct')))) throw protocolError('item:function_call');
-      const existing = items.get(item.id);
+      return kind;
+    };
+    const stateFor = (item: unknown, index: unknown): StreamItem => {
+      const kind = itemKind(item);
+      const value = item as Record<string, unknown>;
+      if (!indexValue(index)) throw protocolError(`item:${kind}`);
+      const existing = items.get(value.id as string);
       if (existing) {
-        if (existing.index !== index || existing.item.type !== item.type || (item.type === 'function_call'
-          && (existing.item.call_id !== item.call_id || existing.item.name !== item.name))) throw protocolError(`item:${kind}`);
+        if (existing.index !== index || existing.item.type !== value.type || (value.type === 'function_call'
+          && (existing.item.call_id !== value.call_id || existing.item.name !== value.name))) throw protocolError(`item:${kind}`);
         return existing;
       }
       if (positions.has(index)) throw protocolError('item:index');
-      const state: StreamItem = { index, item, args: item.type === 'function_call' ? item.arguments as string : '',
+      const state: StreamItem = { index, item: value, args: value.type === 'function_call' ? value.arguments as string : '',
         text: new Map(), reasoning: new Map(), replayed: false };
-      items.set(item.id, state);
-      positions.set(index, item.id);
+      items.set(value.id as string, state);
+      positions.set(index, value.id as string);
       return state;
     };
     const eventState = (event: Record<string, unknown>, type: string) => {
@@ -235,6 +240,10 @@ export async function* streamResponse(key: string, request: OpenAI.Responses.Res
       state.reasoning.set(key, { field, index, value: next });
       if (state.complete) validateReasoningFragments(state, state.complete);
     };
+    // Terminal snapshots may regenerate item ids (vLLM/ollama rebuild response.completed from the
+    // parsed output), so consistency compares every other field and leaves identity alone.
+    const sameItem = (a: Record<string, unknown>, b: Record<string, unknown>) =>
+      isDeepStrictEqual({ ...a, id: undefined }, { ...b, id: undefined });
     const snapshotParts = (state: StreamItem, item: Record<string, unknown>, final: boolean): vscode.LanguageModelResponsePart[] => {
       if (item.status !== undefined && item.status !== 'completed') throw protocolError('snapshot:status');
       const parts: vscode.LanguageModelResponsePart[] = [];
@@ -246,7 +255,7 @@ export async function* streamResponse(key: string, request: OpenAI.Responses.Res
         if (!validReasoning(item)) throw protocolError('snapshot:reasoning');
         // The SDK contract makes the done item authoritative for encrypted replay.
         if (final && state.complete) item = state.complete;
-        else if (state.complete && !isDeepStrictEqual(state.complete, item)) throw protocolError('snapshot:reasoning');
+        else if (state.complete && !sameItem(state.complete, item)) throw protocolError('snapshot:reasoning');
         validateReasoningFragments(state, item);
       } else {
         if (!Array.isArray(item.content)) throw protocolError('snapshot:message');
@@ -264,7 +273,7 @@ export async function* streamResponse(key: string, request: OpenAI.Responses.Res
           state.text.set(index, { type: part.type as string, value });
         }
         if ([...state.text.keys()].some(index => index >= (item.content as unknown[]).length)) throw protocolError('snapshot:part');
-        if (state.complete && !isDeepStrictEqual(state.complete, item)) throw protocolError('snapshot:message');
+        if (state.complete && !sameItem(state.complete, item)) throw protocolError('snapshot:message');
       }
       state.complete = item;
       return parts;
@@ -336,16 +345,32 @@ export async function* streamResponse(key: string, request: OpenAI.Responses.Res
           if (!record(response) || response.status !== 'completed' || response.error != null || response.incomplete_details != null
             || !Array.isArray(response.output) || !response.output.length) throw protocolError('completed:shape');
           const parts: vscode.LanguageModelResponsePart[] = [];
-          const ids = new Set<string>();
           const calls = new Set<string>();
-          for (const [index, item] of response.output.entries()) {
-            const state = stateFor(item, index);
-            const id = state.item.id as string;
-            if (ids.has(id)) throw protocolError('completed:duplicate');
-            ids.add(id);
+          // Providers (vLLM/ollama, and OpenAI-compatible upstreams) may rebuild the terminal snapshot
+          // with regenerated item ids or reordered output, so match each item to its streamed
+          // counterpart by id, then by type and streamed order; content rules below stay strict.
+          const queues = new Map<string, StreamItem[]>();
+          for (const state of [...items.values()].sort((a, b) => a.index - b.index)) {
+            const type = state.item.type as string;
+            queues.set(type, [...(queues.get(type) ?? []), state]);
+          }
+          const matched = new Set<StreamItem>();
+          for (const [position, raw] of response.output.entries()) {
+            const kind = itemKind(raw);
+            const item = raw as Record<string, unknown>;
+            const exact = items.get(item.id as string);
+            const streamed = exact && !matched.has(exact) && exact.item.type === kind ? exact
+              : (queues.get(kind) ?? []).find(candidate => !matched.has(candidate));
+            const state = streamed ?? { index: position, item, args: kind === 'function_call' ? item.arguments as string : '',
+              text: new Map(), reasoning: new Map(), replayed: false };
+            if (!streamed) {
+              items.set(item.id as string, state);
+              queues.set(kind, [...(queues.get(kind) ?? []), state]);
+            }
+            matched.add(state);
             const tail = snapshotParts(state, item, true);
             if (tail.length || (state.item.type === 'reasoning' && !state.replayed) || state.item.type === 'function_call') {
-              if (index < lastImmediateIndex) throw protocolError('completed:order');
+              if (state.index < lastImmediateIndex) throw protocolError('completed:order');
             }
             if (state.item.type === 'function_call') {
               const call = completeTool(state);
@@ -355,7 +380,7 @@ export async function* streamResponse(key: string, request: OpenAI.Responses.Res
             } else if (state.item.type === 'reasoning' && !state.replayed) parts.push(replayPart(state));
             else parts.push(...tail);
           }
-          if (ids.size !== items.size || (!parts.length && ![...items.values()].some(state => state.replayed
+          if (matched.size !== items.size || (!parts.length && ![...items.values()].some(state => state.replayed
             || [...state.text.values()].some(part => part.value.length > 0)))) throw protocolError('completed:coverage');
           terminal = true;
           clearTimeout(timer);

@@ -413,6 +413,33 @@ it('still fails closed on unknown non-reasoning events and names them', async ()
   const { error } = await collect(streamResponse(key, request(), attribution, new AbortController().signal, f.baseURL));
   expect(userMessage(error)).toContain('event:response.future_kind.added');
 });
+it('reconciles a terminal snapshot that regenerated item ids, matching by type and streamed order', async () => {
+  const f = await service([...textStart, event('response.output_item.done', { output_index: 0, item: messageItem('hello') }),
+    complete([{ ...messageItem('hello'), id: 'msg_regenerated' }])]);
+  const result = await collect(streamResponse(key, request(), attribution, new AbortController().signal, f.baseURL));
+  expect(result.error).toBeUndefined();
+  expect(result.parts).toEqual([text('hello')]);
+});
+it('reconciles terminal output reordered across item types', async () => {
+  const f = await service([
+    textStart[0],
+    event('response.output_text.delta', { item_id: 'msg_1', output_index: 0, content_index: 0, delta: 'hello' }),
+    event('response.output_item.added', { output_index: 1, item: { id: 'fc_1', type: 'function_call', call_id: 'call-1', name: 'read_file', arguments: '' } }),
+    event('response.function_call_arguments.delta', { item_id: 'fc_1', output_index: 1, delta: '{"path":"a.ts"}' }),
+    event('response.output_item.done', { output_index: 1, item: toolItem('fc_1', 'call-1') }),
+    event('response.output_item.done', { output_index: 0, item: messageItem('hello') }),
+    complete([toolItem('fc_1', 'call-1'), messageItem('hello')]),
+  ]);
+  const result = await collect(streamResponse(key, request(), attribution, new AbortController().signal, f.baseURL));
+  expect(result.error).toBeUndefined();
+  expect(result.parts).toEqual([text('hello'), call()]);
+});
+it('fails closed when terminal text contradicts what was streamed', async () => {
+  const f = await service([...textStart, event('response.output_item.done', { output_index: 0, item: messageItem('hello') }),
+    complete([messageItem('HELLO')])]);
+  const result = await collect(streamResponse(key, request(), attribution, new AbortController().signal, f.baseURL));
+  expect(userMessage(result.error)).toContain('unsupported');
+});
 it('validates real reasoning content/summary fragments without rendering them as answer text', async () => {
   const item = { ...reasoning, encrypted_content: null,
     content: [{ type: 'reasoning_text', text: 'hidden reasoning' }], summary: [{ type: 'summary_text', text: 'summary' }] };
