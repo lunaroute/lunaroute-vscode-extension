@@ -2,7 +2,9 @@ export interface Attribution { version: string; sessionId: string }
 export type FailureKind = 'auth' | 'policy' | 'billing' | 'rate-limit' | 'network'
   | 'upstream' | 'storage' | 'input' | 'protocol' | 'cancelled';
 export class LunaRouteError extends Error {
-  constructor(readonly kind: FailureKind, readonly status?: number, readonly retryAfterSeconds?: number) {
+  constructor(readonly kind: FailureKind, readonly status?: number, readonly retryAfterSeconds?: number,
+    /** Protocol metadata for support (event/item names). Never carries prompts or content. */
+    readonly detail?: string) {
     super(`LunaRoute ${kind} failure`);
     this.name = 'LunaRouteError';
   }
@@ -55,6 +57,7 @@ export function userMessage(error: unknown): string {
     && Number.isSafeInteger(error.retryAfterSeconds) && error.retryAfterSeconds >= 0) {
     return `${messages[error.kind]} Retry after ${error.retryAfterSeconds} seconds.`;
   }
+  if (error.kind === 'protocol' && error.detail) return `${messages[error.kind]} (${error.detail})`;
   return messages[error.kind];
 }
 export const FRONT_URL = 'https://app.lunaroute.com';

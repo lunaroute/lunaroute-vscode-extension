@@ -2,7 +2,7 @@ import type { IncomingHttpHeaders, RequestListener, ServerResponse } from 'node:
 import { afterEach, expect, it, vi } from 'vitest';
 import * as vscode from 'vscode';
 import { buildResponsesRequest, estimateTokens, streamResponse } from '../src/responses.js';
-import { LunaRouteError } from '../src/lunaroute.js';
+import { LunaRouteError, userMessage } from '../src/lunaroute.js';
 import { deferred } from './vscode.js';
 import { startGatewayFixture, writeSse } from './fixtures/responses-sse.js';
 
@@ -196,6 +196,21 @@ async function collect(iterable: AsyncIterable<vscode.LanguageModelResponsePart>
   catch (error) { return { parts, error }; }
 }
 
+it('names the offending event on an unsupported stream without leaking content', async () => {
+  const f = await service([...textStart, event('response.future_event', { item_id: 'msg_1' })]);
+  const { error } = await collect(streamResponse(key, request(), attribution, new AbortController().signal, f.baseURL));
+  expect(error).toBeInstanceOf(LunaRouteError);
+  expect((error as LunaRouteError).kind).toBe('protocol');
+  expect(userMessage(error)).toContain('event:response.future_event');
+  expect(userMessage(error)).not.toContain(probe);
+});
+it('names the diverging snapshot before failing the completion check', async () => {
+  const f = await service([...textStart, event('response.output_item.done', { output_index: 0, item: messageItem('hello') }),
+    complete([{ ...messageItem('hello'), logprobs: [] }])]);
+  const { error } = await collect(streamResponse(key, request(), attribution, new AbortController().signal, f.baseURL));
+  expect(userMessage(error)).toContain('snapshot:message');
+  expect(userMessage(error)).toContain('response.completed');
+});
 it('streams text before terminal completion through the real SDK and sends exactly one stateless attributed POST', async () => {
   const gate = deferred<void>();
   const requests: string[] = [];

@@ -140,7 +140,7 @@ export function estimateTokens(input: string | vscode.LanguageModelChatRequestMe
   try { return typeof input === 'string' ? bytes(input) : messageInput(input).tokens; } catch { throw inputError(); }
 }
 const STREAM_IDLE_MS = 120000;
-const protocolError = () => new LunaRouteError('protocol');
+const protocolError = (detail?: string) => new LunaRouteError('protocol', undefined, undefined, detail);
 const indexValue = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
 type StreamItem = { index: number; item: Record<string, unknown>; args: string; complete?: Record<string, unknown>;
   text: Map<number, { type: string; value: string }>;
@@ -180,18 +180,19 @@ export async function* streamResponse(key: string, request: OpenAI.Responses.Res
     const allowedTools = new Set(request.tools?.filter(tool => tool.type === 'function').map(tool => tool.name));
     let lastImmediateIndex = -1;
     const stateFor = (item: unknown, index: unknown): StreamItem => {
+      const kind = record(item) && typeof item.type === 'string' ? item.type : 'malformed';
       if (!record(item) || !identity(item.id) || !indexValue(index)
-        || !['message', 'function_call', 'reasoning'].includes(String(item.type))) throw protocolError();
-      if (item.type === 'message' && (item.role !== 'assistant' || (item.phase !== undefined && item.phase !== null))) throw protocolError();
+        || !['message', 'function_call', 'reasoning'].includes(kind)) throw protocolError(`item:${kind}`);
+      if (item.type === 'message' && (item.role !== 'assistant' || (item.phase !== undefined && item.phase !== null))) throw protocolError('item:message');
       if (item.type === 'function_call' && (!identity(item.call_id) || !identity(item.name) || typeof item.arguments !== 'string'
-        || item.async === true || item.namespace || (item.caller !== undefined && (!record(item.caller) || item.caller.type !== 'direct')))) throw protocolError();
+        || item.async === true || item.namespace || (item.caller !== undefined && (!record(item.caller) || item.caller.type !== 'direct')))) throw protocolError('item:function_call');
       const existing = items.get(item.id);
       if (existing) {
         if (existing.index !== index || existing.item.type !== item.type || (item.type === 'function_call'
-          && (existing.item.call_id !== item.call_id || existing.item.name !== item.name))) throw protocolError();
+          && (existing.item.call_id !== item.call_id || existing.item.name !== item.name))) throw protocolError(`item:${kind}`);
         return existing;
       }
-      if (positions.has(index)) throw protocolError();
+      if (positions.has(index)) throw protocolError('item:index');
       const state: StreamItem = { index, item, args: item.type === 'function_call' ? item.arguments as string : '',
         text: new Map(), reasoning: new Map(), replayed: false };
       items.set(item.id, state);
@@ -200,7 +201,7 @@ export async function* streamResponse(key: string, request: OpenAI.Responses.Res
     };
     const eventState = (event: Record<string, unknown>, type: string) => {
       const state = typeof event.item_id === 'string' ? items.get(event.item_id) : undefined;
-      if (!state || state.item.type !== type || event.output_index !== state.index) throw protocolError();
+      if (!state || state.item.type !== type || event.output_index !== state.index) throw protocolError(`event-state:${type}`);
       return state;
     };
     const pendingBefore = (state: StreamItem) => [...items.values()].some(other => other.index < state.index
@@ -221,58 +222,58 @@ export async function* streamResponse(key: string, request: OpenAI.Responses.Res
         const part = Array.isArray(values) ? values[segment.index] : undefined;
         if (record(part) && typeof part.text === 'string' && part.text.startsWith(segment.value)) continue;
         if (segment.field === 'content' && typeof item.encrypted_content === 'string' && item.encrypted_content.length) continue;
-        throw protocolError();
+        throw protocolError('reasoning:fragments');
       }
     };
     const reasoningFragment = (event: Record<string, unknown>, field: 'content' | 'summary', index: unknown, value: unknown, delta = false) => {
       const state = eventState(event, 'reasoning');
-      if (!indexValue(index) || typeof value !== 'string' || (delta && state.complete)) throw protocolError();
+      if (!indexValue(index) || typeof value !== 'string' || (delta && state.complete)) throw protocolError('reasoning:fragments');
       const key = `${field}:${index}`;
       const previous = state.reasoning.get(key)?.value ?? '';
       const next = delta ? previous + value : value;
-      if (!next.startsWith(previous)) throw protocolError();
+      if (!next.startsWith(previous)) throw protocolError('reasoning:fragments');
       state.reasoning.set(key, { field, index, value: next });
       if (state.complete) validateReasoningFragments(state, state.complete);
     };
     const snapshotParts = (state: StreamItem, item: Record<string, unknown>, final: boolean): vscode.LanguageModelResponsePart[] => {
-      if (item.status !== undefined && item.status !== 'completed') throw protocolError();
+      if (item.status !== undefined && item.status !== 'completed') throw protocolError('snapshot:status');
       const parts: vscode.LanguageModelResponsePart[] = [];
       if (item.type === 'function_call') {
         if (typeof item.arguments !== 'string' || !item.arguments.startsWith(state.args)
-          || (state.complete && state.complete.arguments !== item.arguments)) throw protocolError();
+          || (state.complete && state.complete.arguments !== item.arguments)) throw protocolError('snapshot:function_call');
         state.args = item.arguments;
       } else if (item.type === 'reasoning') {
-        if (!validReasoning(item)) throw protocolError();
+        if (!validReasoning(item)) throw protocolError('snapshot:reasoning');
         // The SDK contract makes the done item authoritative for encrypted replay.
         if (final && state.complete) item = state.complete;
-        else if (state.complete && !isDeepStrictEqual(state.complete, item)) throw protocolError();
+        else if (state.complete && !isDeepStrictEqual(state.complete, item)) throw protocolError('snapshot:reasoning');
         validateReasoningFragments(state, item);
       } else {
-        if (!Array.isArray(item.content)) throw protocolError();
+        if (!Array.isArray(item.content)) throw protocolError('snapshot:message');
         for (const [index, part] of item.content.entries()) {
-          if (!record(part) || !['output_text', 'refusal'].includes(String(part.type))) throw protocolError();
+          if (!record(part) || !['output_text', 'refusal'].includes(String(part.type))) throw protocolError('snapshot:part');
           const value = part.type === 'output_text' ? part.text : part.refusal;
-          if (typeof value !== 'string' || (part.annotations !== undefined && (!Array.isArray(part.annotations) || part.annotations.length))) throw protocolError();
+          if (typeof value !== 'string' || (part.annotations !== undefined && (!Array.isArray(part.annotations) || part.annotations.length))) throw protocolError('snapshot:part');
           const previous = state.text.get(index);
-          if (previous && (previous.type !== part.type || !value.startsWith(previous.value))) throw protocolError();
+          if (previous && (previous.type !== part.type || !value.startsWith(previous.value))) throw protocolError('snapshot:part');
           const rest = value.slice(previous?.value.length ?? 0);
           if (rest) {
-            if (laterText(state, index)) throw protocolError();
+            if (laterText(state, index)) throw protocolError('snapshot:order');
             parts.push(new vscode.LanguageModelTextPart(rest));
           }
           state.text.set(index, { type: part.type as string, value });
         }
-        if ([...state.text.keys()].some(index => index >= (item.content as unknown[]).length)) throw protocolError();
-        if (state.complete && !isDeepStrictEqual(state.complete, item)) throw protocolError();
+        if ([...state.text.keys()].some(index => index >= (item.content as unknown[]).length)) throw protocolError('snapshot:part');
+        if (state.complete && !isDeepStrictEqual(state.complete, item)) throw protocolError('snapshot:message');
       }
       state.complete = item;
       return parts;
     };
     const completeTool = (state: StreamItem) => {
       const item = state.complete;
-      if (!item || !identity(item.call_id) || !identity(item.name) || !allowedTools.has(item.name)) throw protocolError();
+      if (!item || !identity(item.call_id) || !identity(item.name) || !allowedTools.has(item.name)) throw protocolError('completed:tool');
       let input: unknown;
-      try { input = JSON.parse(state.args); if (!record(input)) throw protocolError(); json(input); } catch { throw protocolError(); }
+      try { input = JSON.parse(state.args); if (!record(input)) throw protocolError('completed:tool'); json(input); } catch { throw protocolError('completed:tool'); }
       return new vscode.LanguageModelToolCallPart(item.call_id, item.name, input);
     };
     touch();
@@ -280,8 +281,9 @@ export async function* streamResponse(key: string, request: OpenAI.Responses.Res
     for await (const raw of stream) {
       if (combined.aborted) throw abortReason(combined);
       const event: unknown = raw;
-      if (!record(event) || typeof event.type !== 'string') throw protocolError();
-      switch (event.type) {
+      if (!record(event) || typeof event.type !== 'string') throw protocolError('event:malformed');
+      try {
+        switch (event.type) {
         case 'response.output_item.added': {
           const state = stateFor(event.item, event.output_index);
           if (state.item.type === 'message' && Array.isArray(state.item.content) && state.item.content.length) throw protocolError();
@@ -332,29 +334,29 @@ export async function* streamResponse(key: string, request: OpenAI.Responses.Res
         case 'response.completed': {
           const response = event.response;
           if (!record(response) || response.status !== 'completed' || response.error != null || response.incomplete_details != null
-            || !Array.isArray(response.output) || !response.output.length) throw protocolError();
+            || !Array.isArray(response.output) || !response.output.length) throw protocolError('completed:shape');
           const parts: vscode.LanguageModelResponsePart[] = [];
           const ids = new Set<string>();
           const calls = new Set<string>();
           for (const [index, item] of response.output.entries()) {
             const state = stateFor(item, index);
             const id = state.item.id as string;
-            if (ids.has(id)) throw protocolError();
+            if (ids.has(id)) throw protocolError('completed:duplicate');
             ids.add(id);
             const tail = snapshotParts(state, item, true);
             if (tail.length || (state.item.type === 'reasoning' && !state.replayed) || state.item.type === 'function_call') {
-              if (index < lastImmediateIndex) throw protocolError();
+              if (index < lastImmediateIndex) throw protocolError('completed:order');
             }
             if (state.item.type === 'function_call') {
               const call = completeTool(state);
-              if (calls.has(call.callId)) throw protocolError();
+              if (calls.has(call.callId)) throw protocolError('completed:duplicate');
               calls.add(call.callId);
               parts.push(call);
             } else if (state.item.type === 'reasoning' && !state.replayed) parts.push(replayPart(state));
             else parts.push(...tail);
           }
           if (ids.size !== items.size || (!parts.length && ![...items.values()].some(state => state.replayed
-            || [...state.text.values()].some(part => part.value.length > 0)))) throw protocolError();
+            || [...state.text.values()].some(part => part.value.length > 0)))) throw protocolError('completed:coverage');
           terminal = true;
           clearTimeout(timer);
           for (const part of parts) {
@@ -402,10 +404,17 @@ export async function* streamResponse(key: string, request: OpenAI.Responses.Res
         }
         case 'response.created': case 'response.queued': case 'response.in_progress': break;
         default: throw protocolError();
+        }
+      } catch (error) {
+        // Name the event that rejected the stream; detail never carries content.
+        if (error instanceof LunaRouteError && error.kind === 'protocol') {
+          throw protocolError(error.detail ? `${error.detail}@${event.type}` : `event:${event.type}`);
+        }
+        throw error;
       }
     }
     if (combined.aborted) throw abortReason(combined);
-    throw protocolError();
+    throw protocolError('stream:ended');
   } catch (error) {
     if (combined.aborted) throw abortReason(combined);
     if (terminal) return;
