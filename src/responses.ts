@@ -205,7 +205,9 @@ export async function* streamResponse(key: string, request: OpenAI.Responses.Res
       if (!record(item) || !identity(item.id) || !['message', 'function_call', 'reasoning'].includes(kind)) throw protocolError(`item:${kind}`);
       if (item.type === 'message' && (item.role !== 'assistant' || (item.phase !== undefined && item.phase !== null))) throw protocolError('item:message');
       if (item.type === 'function_call' && (!identity(item.call_id) || !identity(item.name) || typeof item.arguments !== 'string'
-        || item.async === true || item.namespace || (item.caller !== undefined && (!record(item.caller) || item.caller.type !== 'direct')))) throw protocolError('item:function_call');
+        // JSON null means unspecified, the convention the gateway applies to absent fields (kata nhz1).
+        || item.async === true || item.namespace
+        || (item.caller != null && (!record(item.caller) || item.caller.type !== 'direct')))) throw protocolError('item:function_call');
       return kind;
     };
     const stateFor = (item: unknown, index: unknown): StreamItem => {
@@ -264,7 +266,7 @@ export async function* streamResponse(key: string, request: OpenAI.Responses.Res
     const snapshotParts = (state: StreamItem, item: Record<string, unknown>, final: boolean): vscode.LanguageModelResponsePart[] => {
       // The completed response is authoritative for its own items: providers rebuild the terminal
       // snapshot and may leave per-item status behind (vllm/ollama); stream-level events stay strict.
-      if (!final && item.status !== undefined && item.status !== 'completed') throw protocolError('snapshot:status');
+      if (!final && item.status != null && item.status !== 'completed') throw protocolError('snapshot:status');
     // Terminal snapshots are authoritative and providers rebuild them: item ids get regenerated
     // (vllm#59834/#59307), per-item status is left behind, and fields such as an empty `summary`
     // appear or disappear (verified against a real sglang-style stream). Content consistency is
@@ -287,7 +289,7 @@ export async function* streamResponse(key: string, request: OpenAI.Responses.Res
         for (const [index, part] of item.content.entries()) {
           if (!record(part) || !['output_text', 'refusal'].includes(String(part.type))) throw protocolError('snapshot:part');
           const value = part.type === 'output_text' ? part.text : part.refusal;
-          if (typeof value !== 'string' || (part.annotations !== undefined && (!Array.isArray(part.annotations) || part.annotations.length))) throw protocolError('snapshot:part');
+          if (typeof value !== 'string' || (part.annotations != null && (!Array.isArray(part.annotations) || part.annotations.length))) throw protocolError('snapshot:part');
           const previous = state.text.get(index);
           if (previous && (previous.type !== part.type || !value.startsWith(previous.value))) throw protocolError('snapshot:part');
           const rest = value.slice(previous?.value.length ?? 0);
@@ -429,7 +431,7 @@ export async function* streamResponse(key: string, request: OpenAI.Responses.Res
           const state = eventState(event, 'message');
           const value = part.type === 'output_text' ? part.text : part.refusal;
           if (!['output_text', 'refusal'].includes(String(part.type)) || !indexValue(event.content_index) || typeof value !== 'string'
-            || (part.annotations !== undefined && (!Array.isArray(part.annotations) || part.annotations.length))) throw protocolError();
+            || (part.annotations != null && (!Array.isArray(part.annotations) || part.annotations.length))) throw protocolError();
           const previous = state.text.get(event.content_index);
           if (previous && (previous.type !== part.type || !value.startsWith(previous.value))) throw protocolError();
           if (state.complete && value !== previous?.value) throw protocolError();

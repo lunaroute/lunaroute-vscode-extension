@@ -535,6 +535,29 @@ it('still rejects a completed call whose arguments are not a JSON object', async
   const result = await collect(streamResponse(key, request(), attribution, new AbortController().signal, f.baseURL));
   expect(userMessage(result.error)).toContain('completed:tool');
 });
+it('accepts a function call whose optional fields are JSON null, as real providers send them', async () => {
+  // Captured shape: caller/async/namespace are null and status is in_progress on the added event.
+  const callItem = { id: 'ae6a9405e2abb44f', type: 'function_call', call_id: 'call_abad8e7807e5c72f', name: 'read_file',
+    arguments: '{"path":"a.ts"}', status: 'completed', async: null, caller: null, namespace: null };
+  const f = await service([
+    event('response.output_item.added', { output_index: 0, item: { ...callItem, arguments: '', status: 'in_progress' } }),
+    event('response.function_call_arguments.delta', { output_index: 0, item_id: callItem.id, delta: '{"path":"a.ts"}' }),
+    event('response.output_item.done', { output_index: 0, item: callItem }),
+    complete([callItem]),
+  ]);
+  const result = await collect(streamResponse(key, request(), attribution, new AbortController().signal, f.baseURL));
+  expect(result.error).toBeUndefined();
+  expect(result.parts).toEqual([call('call_abad8e7807e5c72f')]);
+});
+it('accepts null tool-call and annotation fields while still rejecting a real async caller', async () => {
+  const nulled = { ...messageItem('hello'), content: [{ type: 'output_text', text: 'hello', annotations: null, logprobs: null }] };
+  const f = await service([...textStart, event('response.output_item.done', { output_index: 0, item: nulled }), complete([nulled])]);
+  const result = await collect(streamResponse(key, request(), attribution, new AbortController().signal, f.baseURL));
+  expect(result.error).toBeUndefined();
+  const async1 = { id: 'fc_2', type: 'function_call', call_id: 'call-2', name: 'read_file', arguments: '{}', async: true, caller: null, namespace: null };
+  const g = await service([event('response.output_item.added', { output_index: 0, item: async1 })]);
+  expect(userMessage((await collect(streamResponse(key, request(), attribution, new AbortController().signal, g.baseURL))).error)).toContain('item:function_call');
+});
 it('validates real reasoning content/summary fragments without rendering them as answer text', async () => {
   const item = { ...reasoning, encrypted_content: null,
     content: [{ type: 'reasoning_text', text: 'hidden reasoning' }], summary: [{ type: 'summary_text', text: 'summary' }] };
