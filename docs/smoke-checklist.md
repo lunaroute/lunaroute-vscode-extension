@@ -42,7 +42,15 @@ Nine CLI tag-validation cases were exercised (seven negative cases observed RED,
 
 The existing bootstrap CI [run 38109493288](https://github.com/lunaroute/lunaroute-vscode-extension/actions/runs/38109493288) passed all three OS jobs at `ed3a35e`. Windows/macOS checks are unit/type/build evidence, not native desktop host certification.
 
-Official installation research is linked in README: VSIX installs default to manual updates; private repository downloads require repository access; draft releases require push access; Marketplace publication is separate from GitHub repository ownership. The new repository resolves the repository-bootstrap gate, not Marketplace ownership or live compatibility.
+Official installation research is linked in the GitHub README history: VSIX installs default to manual updates; private repository downloads require repository access; draft releases require push access; Marketplace publication is separate from GitHub repository ownership. The repository bootstrap gate is resolved.
+
+Marketplace status (2026-10-14): the `lunaroute` publisher listing exists and `lunaroute.lunaroute` **0.1.0 is published and validated** on the Visual Studio Marketplace, so automatic updates work for Marketplace installs while VSIX installs stay manual. Version 0.1.1 (marketplace-facing README, 8-bit icon, aligned manifest, MCP contribution) is prepared for upload. The earlier `Value cannot be null. Parameter name: v1` upload failure was the **Visual Studio (IDE) flow** being used instead of **New extension -> Visual Studio Code**; it was not a payload defect. Windows/macOS hosts, remote workspaces, long Agent tool-history sessions and Marketplace publisher ownership remain open gates.
+
+## MCP contribution — live verified (2026-10-14)
+
+The extension contributes the hosted LunaRoute MCP server (`https://mcp.lunaroute.com/mcp`) as an `McpHttpServerDefinition` carrying the current key and attribution headers (commit bd17c0b). Verified: unit coverage for offered-while-connected, key rotation and withdrawal on sign-out; the packaged manifest declares the provider id (asserted in the archive checker, since the host rejects an undeclared registration); real 1.141 source and installed-VSIX host runs pass with the registration active; and **live end to end** - the owner enabled the server in MCP SERVERS - INSTALLED and completed a hosted tool call (image generation) against the production MCP server. That live call also settles the earlier concern that VS Code might drop definition headers (upstream microsoft/vscode#264095 and #286670 report such regressions): authentication succeeded, so the headers arrived.
+
+**Still open:** inline rendering of generated images in the chat surface. VS Code does not render HTML/markdown images from text, and the supported route (an MCP image content block, or an MCP App UI resource that keeps bytes out of model context) is deliberately parked at the owner's request; today the tool result shows the image URL and the model formats an `<img>` tag.
 
 ## Repeatable direct host checks
 
