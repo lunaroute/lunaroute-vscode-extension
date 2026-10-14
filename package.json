@@ -2,7 +2,7 @@
   "name": "lunaroute",
   "displayName": "LunaRoute",
   "description": "LunaRoute models in native VS Code Chat and Agent mode",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "lunaroute",
   "license": "MIT",
   "repository": {
