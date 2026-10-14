@@ -83,5 +83,10 @@
     "typescript": "7.0.2",
     "vitest": "5.0.3"
   },
-  "icon": "icon.png"
+  "icon": "icon.png",
+  "categories": [
+    "AI",
+    "Chat",
+    "Machine Learning"
+  ]
 }
