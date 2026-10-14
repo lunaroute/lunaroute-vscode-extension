@@ -2,7 +2,9 @@ export interface Attribution { version: string; sessionId: string }
 export type FailureKind = 'auth' | 'policy' | 'billing' | 'rate-limit' | 'network'
   | 'upstream' | 'storage' | 'input' | 'protocol' | 'cancelled';
 export class LunaRouteError extends Error {
-  constructor(readonly kind: FailureKind, readonly status?: number, readonly retryAfterSeconds?: number) {
+  constructor(readonly kind: FailureKind, readonly status?: number, readonly retryAfterSeconds?: number,
+    /** Protocol metadata for support (event/item names). Never carries prompts or content. */
+    readonly detail?: string) {
     super(`LunaRoute ${kind} failure`);
     this.name = 'LunaRouteError';
   }
@@ -55,11 +57,16 @@ export function userMessage(error: unknown): string {
     && Number.isSafeInteger(error.retryAfterSeconds) && error.retryAfterSeconds >= 0) {
     return `${messages[error.kind]} Retry after ${error.retryAfterSeconds} seconds.`;
   }
+  if (error.kind === 'protocol' && error.detail) return `${messages[error.kind]} (${error.detail})`;
   return messages[error.kind];
 }
+/** One-shot local capture target for preview diagnostics; set by the capture command, never holds credentials. */
+export const capture: { directory?: string } = {};
 export const FRONT_URL = 'https://app.lunaroute.com';
 export const API_URL = 'https://api.lunaroute.com';
 export const ROUTING_URL = 'https://gw.lunaroute.com/v1';
+/** Hosted LunaRoute MCP server (Streamable HTTP) that native Agent mode can use through the host. */
+export const MCP_URL = 'https://mcp.lunaroute.com/mcp';
 export const LOGIN_TIMEOUT_MS = 900000;
 export const EXCHANGE_TIMEOUT_MS = 15000;
 export const CATALOG_TIMEOUT_MS = 10000;

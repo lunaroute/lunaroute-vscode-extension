@@ -11,7 +11,7 @@ Status: **preview; not release-certified**. Source/unit checks, direct extension
 | 2026-10-10 | Same actual host, controlled fixture, no GitHub session | PKCE/SecretStorage events; model selection/counting; SDK text, multiple tools/results, images and opaque replay; caller cancellation, replacement and model changes | Passed through public `lm.selectChatModels` / `sendRequest`. Native model broker returned replay data and accepted it in a later direct request. No extension-side tool execution. This does **not** prove the built-in Chat/Agent caller preserves that history. |
 | 2026-10-10 | SaaS draft PR [#1436](https://github.com/lunaroute/lunaroute-saas/pull/1436), commit `756858b09644e51b6581be4a8d21e6b9e00e5799` | Scoped auth/onboarding checks | Local Go/frontend gates and PR CI passed. **Not merged or deployed**; deployed-SHA evidence unavailable. |
 
-Final local extension gates were repeated with the planned Node 24 toolchain, extracted under ignored \`.vscode-test/node24/\` after verifying the official SHA-256 manifest; earlier Node 22 runs were preliminary. The inspected VSIX SHA-256 was \`3b9401d045bf61eb59974399f8c80128cb658684c378acd222d60708c4272824\` (ZIP timestamps mean a new package run can change that archive hash).
+Final local extension gates were repeated with the planned Node 24 toolchain, extracted under ignored \`.vscode-test/node24/\` after verifying the official SHA-256 manifest; earlier Node 22 runs were preliminary. The inspected VSIX SHA-256 was \`88beedbd0d7a6432c9c994cee3d805f91a0dd7c7c59fd6e852e358a6210b9d11\` (ZIP timestamps mean a new package run can change that archive hash).
 
 The host run emitted VS Code startup diagnostics (unsigned-in GitHub/agent-host channels and a platform deprecation warning) and native cancellation diagnostics. The process exited 0 with all contract checkpoints passing. No real LunaRoute credentials, customer prompts or live gateway inference were used. Real SecretStorage API/events were exercised; this is not an OS-keyring encryption audit or a two-window test.
 
@@ -33,6 +33,16 @@ After the corrections: **199/199 tests**, typecheck/build/package, normal and ne
 **Deferred minors:** the extension sends `hostname` where exchange expects `label`, leaving generic dashboard key names; malformed catalog rows are safely excluded but lack sanitized rejection diagnostics. These remain open, not silently fixed.
 
 Storage failure can still leave a saved key until storage is repaired and Sign Out succeeds or the key is revoked. Cancellation may wait for the platform storage call; this does not claim cross-process atomicity. All live/platform/ownership release gates below remain open.
+
+## Release automation and installation follow-up — 2026-10-11
+
+The approved release path is a matching version tag, the reusable full CI workflow, then a **draft** GitHub Release with the tested VSIX. It does not publish to Marketplace, deploy SaaS, create tags implicitly or change repository visibility.
+
+Nine CLI tag-validation cases were exercised (seven negative cases observed RED, then all nine GREEN). Local Node 24 verification now passes **208/208 tests**, typecheck/build/package, positive and negative archive checks, and installed-VSIX Linux host checks. Both workflows pass actionlint 1.7.7; that tool was downloaded and checksum-verified under ignored `.vscode-test/`, not installed system-wide. Logs: `release-*.log` in the plan workspace. No real release tag or draft-release API call was made, so draft creation itself is not end-to-end certified.
+
+The existing bootstrap CI [run 38109493288](https://github.com/lunaroute/lunaroute-vscode-extension/actions/runs/38109493288) passed all three OS jobs at `ed3a35e`. Windows/macOS checks are unit/type/build evidence, not native desktop host certification.
+
+Official installation research is linked in README: VSIX installs default to manual updates; private repository downloads require repository access; draft releases require push access; Marketplace publication is separate from GitHub repository ownership. The new repository resolves the repository-bootstrap gate, not Marketplace ownership or live compatibility.
 
 ## Repeatable direct host checks
 
@@ -78,4 +88,4 @@ Requires owner-authorized deployment of the scoped SaaS change and a disposable 
 | WSL, local UI extension | Pending | Pending | Pending |
 | Dev Container, local UI extension | Pending | Pending | Pending |
 
-Browser-only VS Code and remote workspace extension-host placement are deliberately unsupported. Unit placement checks are not a remote smoke test. Marketplace publisher/repository ownership, publication authority, cross-platform/remote checks, packaged live-login/inference and live native compatibility remain release gates.
+Browser-only VS Code and remote workspace extension-host placement are deliberately unsupported. Unit placement checks are not a remote smoke test. Marketplace publisher ownership, publication authority, cross-platform/remote checks, packaged live-login/inference and live native compatibility remain release gates.

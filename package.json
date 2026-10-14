@@ -2,7 +2,7 @@
   "name": "lunaroute",
   "displayName": "LunaRoute",
   "description": "LunaRoute models in native VS Code Chat and Agent mode",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "lunaroute",
   "license": "MIT",
   "repository": {
@@ -22,16 +22,44 @@
   "extensionKind": [
     "ui"
   ],
-  "activationEvents": ["onStartupFinished"],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
   "contributes": {
     "commands": [
-      { "command": "lunaroute.signIn", "title": "LunaRoute: Sign In" },
-      { "command": "lunaroute.signOut", "title": "LunaRoute: Sign Out" },
-      { "command": "lunaroute.manage", "title": "LunaRoute: Manage" },
-      { "command": "lunaroute.refreshModels", "title": "LunaRoute: Refresh Models" }
+      {
+        "command": "lunaroute.signIn",
+        "title": "LunaRoute: Sign In"
+      },
+      {
+        "command": "lunaroute.signOut",
+        "title": "LunaRoute: Sign Out"
+      },
+      {
+        "command": "lunaroute.manage",
+        "title": "LunaRoute: Manage"
+      },
+      {
+        "command": "lunaroute.refreshModels",
+        "title": "LunaRoute: Refresh Models"
+      },
+      {
+        "command": "lunaroute.captureDiagnostics",
+        "title": "LunaRoute: Capture Chat Diagnostics (Preview)"
+      }
     ],
     "languageModelChatProviders": [
-      { "vendor": "lunaroute", "displayName": "LunaRoute", "managementCommand": "lunaroute.manage" }
+      {
+        "vendor": "lunaroute",
+        "displayName": "LunaRoute",
+        "managementCommand": "lunaroute.manage"
+      }
+    ],
+    "mcpServerDefinitionProviders": [
+      {
+        "id": "lunaroute.mcp",
+        "label": "LunaRoute"
+      }
     ]
   },
   "scripts": {
@@ -54,5 +82,11 @@
     "esbuild": "0.28.2",
     "typescript": "7.0.2",
     "vitest": "5.0.3"
-  }
+  },
+  "icon": "icon.png",
+  "categories": [
+    "AI",
+    "Chat",
+    "Machine Learning"
+  ]
 }

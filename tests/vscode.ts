@@ -71,7 +71,20 @@ export const env = { uiKind: 1, remoteName: undefined as string | undefined,
   openExternal: vi.fn(async (_uri: { toString(): string }) => false),
 };
 export const registeredProviders = new Map<string, LanguageModelChatProvider>();
+export class McpHttpServerDefinition {
+  constructor(public label: string, public uri: unknown, public headers: Record<string, string> = {}, public version?: string) {}
+}
+export interface ShimMcpProvider {
+  onDidChangeMcpServerDefinitions?: (listener: () => void) => Disposable;
+  provideMcpServerDefinitions: (token?: unknown) => Promise<readonly unknown[]>;
+  resolveMcpServerDefinition?: (server: unknown, token?: unknown) => Promise<unknown>;
+}
+export const mcpProviders = new Map<string, ShimMcpProvider>();
 export const lm = {
+  registerMcpServerDefinitionProvider(id: string, provider: ShimMcpProvider) {
+    mcpProviders.set(id, provider);
+    return new Disposable(() => mcpProviders.delete(id));
+  },
   registerLanguageModelChatProvider(vendor: string, provider: LanguageModelChatProvider) {
     if (registeredProviders.has(vendor)) throw new Error('Duplicate provider');
     registeredProviders.set(vendor, provider);
@@ -86,8 +99,11 @@ export const workspace = { getConfiguration(section = '') {
 } };
 export const notices = { information: [] as string[], errors: [] as string[], nextPick: undefined as string | undefined,
   picks: [] as { items: readonly { label: string }[]; options: unknown }[] };
+export const pickedFolders: { fsPath: string }[] = [];
 export const window = {
   async showInformationMessage(message: string) { notices.information.push(message); },
+  async showWarningMessage(message: string) { notices.information.push(message); },
+  async showOpenDialog() { return pickedFolders; },
   async showErrorMessage(message: string) { notices.errors.push(message); },
   async showQuickPick<T extends { label: string }>(items: readonly T[], options?: unknown) {
     notices.picks.push({ items, options });

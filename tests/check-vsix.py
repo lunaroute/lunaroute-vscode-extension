@@ -8,7 +8,7 @@ from zipfile import ZipFile
 required = {
     "[Content_Types].xml", "extension.vsixmanifest", "extension/package.json",
     "extension/readme.md", "extension/LICENSE.txt", "extension/THIRD_PARTY_NOTICES.txt",
-    "extension/dist/extension.cjs",
+    "extension/dist/extension.cjs", "extension/icon.png",
 }
 optional = {"extension/dist/extension.cjs.LEGAL.txt"}
 with ZipFile(sys.argv[1]) as archive:
@@ -20,7 +20,10 @@ with ZipFile(sys.argv[1]) as archive:
     assert manifest["main"] == "./dist/extension.cjs"
     assert manifest["extensionKind"] == ["ui"]
     assert "browser" not in manifest and "enabledApiProposals" not in manifest
+    assert manifest["icon"] == "icon.png", "Manifest must reference the packaged icon"
     assert manifest["contributes"]["languageModelChatProviders"][0]["vendor"] == "lunaroute"
+    # The MCP provider id must be declared or the host rejects the registration at runtime.
+    assert manifest["contributes"]["mcpServerDefinitionProviders"][0]["id"] == "lunaroute.mcp"
     notices = archive.read("extension/THIRD_PARTY_NOTICES.txt")
     root = Path(__file__).resolve().parent.parent
     for license_path in ["LICENSE", "src/_vendor/partial-json-parser/LICENSE", "src/internal/qs/LICENSE.md"]:

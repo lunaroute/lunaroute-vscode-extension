@@ -1,8 +1,12 @@
 import type { IncomingHttpHeaders, RequestListener, ServerResponse } from 'node:http';
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
 import * as vscode from 'vscode';
 import { buildResponsesRequest, estimateTokens, streamResponse } from '../src/responses.js';
-import { LunaRouteError } from '../src/lunaroute.js';
+import { mapCatalog } from '../src/catalog.js';
+import { capture, LunaRouteError, userMessage } from '../src/lunaroute.js';
 import { deferred } from './vscode.js';
 import { startGatewayFixture, writeSse } from './fixtures/responses-sse.js';
 
@@ -26,6 +30,7 @@ const probe = 'private_probe_prompt_or_tool_content';
 const fixtures: Awaited<ReturnType<typeof startGatewayFixture>>[] = [];
 afterEach(async () => {
   for (const fixture of fixtures.splice(0)) await fixture.close();
+  capture.directory = undefined;
   vi.useRealTimers();
   vi.unstubAllEnvs();
 });
@@ -102,8 +107,19 @@ it('rejects unrepresentable named messages, misplaced tool parts and over-budget
   }
   expect(() => buildResponsesRequest({ ...model, maxInputTokens: 32 }, [user('too big')], auto)).toThrow(LunaRouteError);
 });
-it('rejects unknown roles instead of inventing a public System role', () => {
-  expect(() => buildResponsesRequest(model, [{ role: 0 as vscode.LanguageModelChatMessageRole, content: [text('instruction')], name: undefined }], auto)).toThrow(LunaRouteError);
+it('accepts VS Code 1.141 System-role instructions from the native chat', () => {
+  const system = { role: 3 as vscode.LanguageModelChatMessageRole, name: undefined, content: [text('You are LunaRoute.')] };
+  const request = buildResponsesRequest(model, [system, user('hello world')], auto);
+  expect(request.input).toEqual([
+    { role: 'system', content: [{ type: 'input_text', text: 'You are LunaRoute.' }] },
+    { role: 'user', content: [{ type: 'input_text', text: 'hello world' }] },
+  ]);
+  expect(estimateTokens(system)).toBeGreaterThan(32);
+});
+it('rejects roles the host cannot deliver instead of guessing a mapping', () => {
+  for (const role of [0, 4]) {
+    expect(() => buildResponsesRequest(model, [{ role: role as vscode.LanguageModelChatMessageRole, content: [text('instruction')], name: undefined }], auto)).toThrow(LunaRouteError);
+  }
 });
 it.each([
   { value: 'opaque instructions' },
@@ -185,6 +201,21 @@ async function collect(iterable: AsyncIterable<vscode.LanguageModelResponsePart>
   catch (error) { return { parts, error }; }
 }
 
+it('names the offending event on an unsupported stream without leaking content', async () => {
+  const f = await service([...textStart, event('response.future_event', { item_id: 'msg_1' })]);
+  const { error } = await collect(streamResponse(key, request(), attribution, new AbortController().signal, f.baseURL));
+  expect(error).toBeInstanceOf(LunaRouteError);
+  expect((error as LunaRouteError).kind).toBe('protocol');
+  expect(userMessage(error)).toContain('event:response.future_event');
+  expect(userMessage(error)).not.toContain(probe);
+});
+it('names the diverging streamed snapshot and the event that carried it', async () => {
+  const f = await service([...textStart, event('response.output_item.done', { output_index: 0, item: messageItem('hello') }),
+    event('response.output_item.done', { output_index: 0, item: messageItem('hello!') })]);
+  const { error } = await collect(streamResponse(key, request(), attribution, new AbortController().signal, f.baseURL));
+  expect(userMessage(error)).toContain('snapshot:message');
+  expect(userMessage(error)).toContain('response.output_item.done');
+});
 it('streams text before terminal completion through the real SDK and sends exactly one stateless attributed POST', async () => {
   const gate = deferred<void>();
   const requests: string[] = [];
@@ -261,8 +292,8 @@ it('round-trips completed opaque reasoning without rendering it as answer text',
     event('response.output_item.done', { output_index: 0, item: reasoning }), complete([reasoning])]);
   const result = await collect(streamResponse(key, request(), attribution, new AbortController().signal, f.baseURL));
   expect(result.error).toBeUndefined();
-  expect(result.parts).toHaveLength(1);
-  expect(result.parts[0]).toBeInstanceOf(vscode.LanguageModelDataPart);
+  expect(result.parts.filter(part => part instanceof vscode.LanguageModelDataPart)).toHaveLength(1);
+  expect(result.parts.filter(part => part instanceof vscode.LanguageModelTextPart)).toEqual([text('LunaRoute returned no visible answer for this turn.')]);
   const part = result.parts[0] as vscode.LanguageModelDataPart;
   expect(part.mimeType).toBe(mime);
   expect(JSON.parse(new TextDecoder().decode(part.data))).toEqual({ modelId: 'chat-a', item: reasoning });
@@ -285,10 +316,9 @@ it('keeps completed reasoning before subsequent answer text in replay history', 
   expect(buildResponsesRequest(model, [new vscode.LanguageModelChatMessage(vscode.LanguageModelChatMessageRole.Assistant, result.parts)], auto).input)
     .toEqual([reasoning, { role: 'assistant', content: [{ type: 'input_text', text: 'hello' }] }]);
 });
-it.each(['response.failed', 'response.incomplete', 'empty', 'empty-message', 'phase', 'unknown-tool'])('fails closed for %s without tool activity', async failure => {
+it.each(['response.failed', 'empty', 'empty-message', 'phase'])('fails closed for %s without tool activity', async failure => {
   const output = failure === 'phase' ? [{ ...messageItem('hello'), phase: 'commentary' }]
-    : failure === 'empty-message' ? [messageItem('')]
-    : failure === 'unknown-tool' ? [{ ...toolItem('fc_bad', 'bad'), name: 'not_offered' }] : [];
+    : failure === 'empty-message' ? [messageItem('')] : [];
   const f = await service(failure.startsWith('response.')
     ? [event(failure, { response: { status: failure.slice(9), error: { message: probe } } })] : [complete(output)]);
   const result = await collect(streamResponse(key, request(), attribution, new AbortController().signal, f.baseURL));
@@ -369,6 +399,248 @@ it('waits for earlier messages before publishing ready reasoning, then preserves
   expect(result.parts).toEqual([text('hello'), replay(), text('later')]);
 });
 
+it('tolerates provider reasoning-part bookkeeping events that never carry answer text', async () => {
+  const item = { ...reasoning, encrypted_content: null, content: [{ type: 'reasoning_text', text: 'hidden reasoning' }] };
+  const f = await service([
+    event('response.output_item.added', { output_index: 0, item: { ...reasoning, encrypted_content: null, status: 'in_progress' } }),
+    event('response.reasoning_part.added', { output_index: 0, item_id: 'rs_1', content_index: 0, part: { type: 'reasoning_text', text: '' } }),
+    event('response.reasoning_part.done', { output_index: 0, item_id: 'rs_1', content_index: 0, part: { type: 'reasoning_text', text: 'hidden reasoning' } }),
+    event('response.output_item.done', { output_index: 0, item }), complete([item]),
+  ]);
+  const result = await collect(streamResponse(key, request(), attribution, new AbortController().signal, f.baseURL));
+  expect(result.error).toBeUndefined();
+  expect(result.parts.filter(part => part instanceof vscode.LanguageModelDataPart)).toHaveLength(1);
+  expect(JSON.parse(new TextDecoder().decode((result.parts.find(part => part instanceof vscode.LanguageModelDataPart) as vscode.LanguageModelDataPart).data))).toEqual({ modelId: 'chat-a', item });
+});
+it('still fails closed on unknown non-reasoning events and names them', async () => {
+  const f = await service([...textStart, event('response.future_kind.added', { item_id: 'msg_1' })]);
+  const { error } = await collect(streamResponse(key, request(), attribution, new AbortController().signal, f.baseURL));
+  expect(userMessage(error)).toContain('event:response.future_kind.added');
+});
+it('reconciles a terminal snapshot that regenerated item ids, matching by type and streamed order', async () => {
+  const f = await service([...textStart, event('response.output_item.done', { output_index: 0, item: messageItem('hello') }),
+    complete([{ ...messageItem('hello'), id: 'msg_regenerated' }])]);
+  const result = await collect(streamResponse(key, request(), attribution, new AbortController().signal, f.baseURL));
+  expect(result.error).toBeUndefined();
+  expect(result.parts).toEqual([text('hello')]);
+});
+it('reconciles terminal output reordered across item types', async () => {
+  const f = await service([
+    textStart[0],
+    event('response.output_text.delta', { item_id: 'msg_1', output_index: 0, content_index: 0, delta: 'hello' }),
+    event('response.output_item.added', { output_index: 1, item: { id: 'fc_1', type: 'function_call', call_id: 'call-1', name: 'read_file', arguments: '' } }),
+    event('response.function_call_arguments.delta', { item_id: 'fc_1', output_index: 1, delta: '{"path":"a.ts"}' }),
+    event('response.output_item.done', { output_index: 1, item: toolItem('fc_1', 'call-1') }),
+    event('response.output_item.done', { output_index: 0, item: messageItem('hello') }),
+    complete([toolItem('fc_1', 'call-1'), messageItem('hello')]),
+  ]);
+  const result = await collect(streamResponse(key, request(), attribution, new AbortController().signal, f.baseURL));
+  expect(result.error).toBeUndefined();
+  expect(result.parts).toEqual([text('hello'), call()]);
+});
+it('fails closed when terminal text contradicts what was streamed', async () => {
+  const f = await service([...textStart, event('response.output_item.done', { output_index: 0, item: messageItem('hello') }),
+    complete([messageItem('HELLO')])]);
+  const result = await collect(streamResponse(key, request(), attribution, new AbortController().signal, f.baseURL));
+  expect(userMessage(result.error)).toContain('unsupported');
+});
+it('captures the exact request and response for preview diagnostics without credentials', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'lunaroute-capture-'));
+  try {
+    const f = await service([...textStart, ...textEnd]);
+    capture.directory = directory;
+    const result = await collect(streamResponse(key, request(), attribution, new AbortController().signal, f.baseURL));
+    expect(result.error).toBeUndefined();
+    const files = readdirSync(directory).sort();
+    expect(files.some(name => name.endsWith('-request.json'))).toBe(true);
+    expect(files.some(name => name.endsWith('-response.meta.json'))).toBe(true);
+    expect(files.some(name => name.endsWith('-response.sse'))).toBe(true);
+    const saved = files.map(name => readFileSync(join(directory, name), 'utf8')).join('\n');
+    expect(saved).toContain('"model":"chat-a"');
+    expect(saved).toContain('response.completed');
+    expect(saved).not.toContain(key);
+    expect(saved.toLowerCase()).not.toContain('authorization');
+    expect(capture.directory).toBeUndefined();
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+it('records only safe metadata when a captured exchange fails', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'lunaroute-capture-fail-'));
+  try {
+    const f = await service([...textStart, event('response.future_kind.added', { item_id: 'msg_1' })]);
+    capture.directory = directory;
+    const result = await collect(streamResponse(key, request(), attribution, new AbortController().signal, f.baseURL));
+    expect(result.error).toBeInstanceOf(LunaRouteError);
+    const saved = readdirSync(directory).filter(name => name.endsWith('-error.txt')).map(name => readFileSync(join(directory, name), 'utf8')).join('\n');
+    expect(saved).toContain('protocol');
+    expect(saved).toContain('response.future_kind.added');
+    expect(saved).not.toContain(probe);
+    expect(capture.directory).toBeUndefined();
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+it('treats the completed response as authoritative for terminal item status', async () => {
+  const f = await service([...textStart, event('response.output_item.done', { output_index: 0, item: messageItem('hello') }),
+    complete([{ ...messageItem('hello'), status: 'in_progress' }])]);
+  const result = await collect(streamResponse(key, request(), attribution, new AbortController().signal, f.baseURL));
+  expect(result.error).toBeUndefined();
+  expect(result.parts).toEqual([text('hello')]);
+});
+it('accepts the real terminal snapshot shape: null reasoning status, regenerated ids and dropped fields', async () => {
+  // Shapes copied from a captured production stream (sglang-style serving behind the gateway).
+  const reasoningDone = { ...reasoning, encrypted_content: null,
+    content: [{ type: 'reasoning_text', text: 'hidden reasoning' }] };
+  const f = await service([
+    event('response.output_item.added', { output_index: 0, item: { ...reasoning, encrypted_content: null, status: 'in_progress' } }),
+    event('response.reasoning_part.added', { output_index: 0, item_id: 'rs_1', content_index: 0 }),
+    event('response.reasoning_text.delta', { output_index: 0, item_id: 'rs_1', content_index: 0, delta: 'hidden reasoning' }),
+    event('response.reasoning_text.done', { output_index: 0, item_id: 'rs_1', content_index: 0, text: 'hidden reasoning' }),
+    event('response.reasoning_part.done', { output_index: 0, item_id: 'rs_1', content_index: 0 }),
+    event('response.output_item.done', { output_index: 0, item: reasoningDone }),
+    event('response.output_item.added', { output_index: 1, item: { id: 'msg_1', type: 'message', role: 'assistant', status: 'in_progress', phase: null, content: [] } }),
+    event('response.output_text.delta', { output_index: 1, item_id: 'msg_1', content_index: 0, delta: 'hello' }),
+    event('response.output_item.done', { output_index: 1, item: { ...messageItem('hello'), summary: [] } }),
+    complete([{ ...reasoningDone, id: 'b7a8138c4e7d4442999', status: null },
+      { ...messageItem('hello'), id: 'beaab13cc314f72e999' }]),
+  ]);
+  const result = await collect(streamResponse(key, request(), attribution, new AbortController().signal, f.baseURL));
+  expect(result.error).toBeUndefined();
+  expect(result.parts.filter(part => part instanceof vscode.LanguageModelTextPart)).toEqual([text('hello')]);
+  expect(result.parts.filter(part => part instanceof vscode.LanguageModelDataPart)).toHaveLength(1);
+});
+it('still rejects a streamed item that contradicts an earlier streamed snapshot', async () => {
+  const f = await service([...textStart, event('response.output_item.done', { output_index: 0, item: messageItem('hello') }),
+    event('response.output_item.done', { output_index: 0, item: messageItem('hello!') }), complete([messageItem('hello!')])]);
+  const result = await collect(streamResponse(key, request(), attribution, new AbortController().signal, f.baseURL));
+  expect(userMessage(result.error)).toContain('snapshot:message');
+});
+it.each(['streamed', 'terminal-only'] as const)('passes through a %s call for a tool the host never offered so the host can answer the model', async mode => {
+  // VS Code owns tool execution: an unknown name is answered to the model as a failed tool result,
+  // which is how a chat recovers. Only malformed or duplicated calls remain fatal.
+  const hallucinated = { id: 'fc_1', call_id: 'call-1', type: 'function_call', name: 'run_in_terminal', arguments: '{"command":"ls"}', status: 'completed' };
+  const f = await service(mode === 'streamed' ? [
+    event('response.output_item.added', { output_index: 0, item: { ...hallucinated, arguments: '', status: 'in_progress' } }),
+    event('response.function_call_arguments.delta', { output_index: 0, item_id: 'fc_1', delta: '{"command":"ls"}' }),
+    event('response.output_item.done', { output_index: 0, item: hallucinated }),
+    complete([hallucinated]),
+  ] : [complete([hallucinated])]);
+  const result = await collect(streamResponse(key, request(), attribution, new AbortController().signal, f.baseURL));
+  expect(result.error).toBeUndefined();
+  expect(result.parts).toEqual([new vscode.LanguageModelToolCallPart('call-1', 'run_in_terminal', { command: 'ls' })]);
+});
+it('still rejects a completed call whose arguments are not a JSON object', async () => {
+  const broken = { id: 'fc_1', call_id: 'call-1', type: 'function_call', name: 'read_file', arguments: 'not-json', status: 'completed' };
+  const f = await service([
+    event('response.output_item.added', { output_index: 0, item: { ...broken, arguments: '' } }),
+    event('response.output_item.done', { output_index: 0, item: broken }),
+    complete([broken]),
+  ]);
+  const result = await collect(streamResponse(key, request(), attribution, new AbortController().signal, f.baseURL));
+  expect(userMessage(result.error)).toContain('completed:tool');
+});
+it('accepts a function call whose optional fields are JSON null, as real providers send them', async () => {
+  // Captured shape: caller/async/namespace are null and status is in_progress on the added event.
+  const callItem = { id: 'ae6a9405e2abb44f', type: 'function_call', call_id: 'call_abad8e7807e5c72f', name: 'read_file',
+    arguments: '{"path":"a.ts"}', status: 'completed', async: null, caller: null, namespace: null };
+  const f = await service([
+    event('response.output_item.added', { output_index: 0, item: { ...callItem, arguments: '', status: 'in_progress' } }),
+    event('response.function_call_arguments.delta', { output_index: 0, item_id: callItem.id, delta: '{"path":"a.ts"}' }),
+    event('response.output_item.done', { output_index: 0, item: callItem }),
+    complete([callItem]),
+  ]);
+  const result = await collect(streamResponse(key, request(), attribution, new AbortController().signal, f.baseURL));
+  expect(result.error).toBeUndefined();
+  expect(result.parts).toEqual([call('call_abad8e7807e5c72f')]);
+});
+it('accepts null tool-call and annotation fields while still rejecting a real async caller', async () => {
+  const nulled = { ...messageItem('hello'), content: [{ type: 'output_text', text: 'hello', annotations: null, logprobs: null }] };
+  const f = await service([...textStart, event('response.output_item.done', { output_index: 0, item: nulled }), complete([nulled])]);
+  const result = await collect(streamResponse(key, request(), attribution, new AbortController().signal, f.baseURL));
+  expect(result.error).toBeUndefined();
+  const async1 = { id: 'fc_2', type: 'function_call', call_id: 'call-2', name: 'read_file', arguments: '{}', async: true, caller: null, namespace: null };
+  const g = await service([event('response.output_item.added', { output_index: 0, item: async1 })]);
+  expect(userMessage((await collect(streamResponse(key, request(), attribution, new AbortController().signal, g.baseURL))).error)).toContain('item:function_call');
+});
+it('routes every catalog model through /v1/responses and nothing else', async () => {
+  // One client contract for every LunaRoute model: the gateway adapts upstream dialects, the extension
+  // never selects a per-model API (chat completions, messages, or a host-declared apiType).
+  const models = mapCatalog({ data: [
+    { id: 'chat-a', display_name: 'A', context_window: 131072, max_output_tokens: 8192, capabilities: { tools: true, vision: true } },
+    { id: 'chat-b', display_name: 'B', context_window: 32768, max_output_tokens: 4096, capabilities: {} },
+    { id: 'vendor/raw-id', context_window: 8192, max_output_tokens: 1024, capabilities: { tools: true } },
+  ] });
+  const f = await service([...textStart, ...textEnd]);
+  for (const candidate of models) {
+    const built = buildResponsesRequest(candidate, [user('hello')],
+      candidate.capabilities?.toolCalling ? { ...auto, tools } : auto);
+    const result = await collect(streamResponse(key, built, attribution, new AbortController().signal, f.baseURL));
+    expect(result.error).toBeUndefined();
+  }
+  expect(f.requests.map(request => request.path)).toEqual(['/v1/responses', '/v1/responses', '/v1/responses']);
+  for (const sent of f.requests) expect(sent.body).toMatchObject({ stream: true, store: false });
+});
+it('drops the host tool-result cache sentinel instead of failing the turn', async () => {
+  const sentinel = new vscode.LanguageModelDataPart(new TextEncoder().encode('ephemeral'), 'cache_control');
+  const request = buildResponsesRequest(model, [user('Read the file'), assistant([call()]), user([result('call-1', [sentinel, text('contents')])])], auto);
+  expect(request.input).toContainEqual({ type: 'function_call_output', call_id: 'call-1', output: 'contents' });
+  expect(JSON.stringify(request.input)).not.toContain('ephemeral');
+});
+it('still rejects an unknown data part inside a tool result', async () => {
+  const unknown = new vscode.LanguageModelDataPart(new TextEncoder().encode('payload'), 'application/x-not-ours');
+  expect(() => buildResponsesRequest(model, [user('Read the file'), assistant([call()]), user([result('call-1', [unknown])])], auto)).toThrow(LunaRouteError);
+});
+it('delivers streamed text when the response is cut short by the output limit', async () => {
+  const f = await service([...textStart, event('response.incomplete', { response: { status: 'incomplete', incomplete_details: { reason: 'max_output_tokens' } } })]);
+  const result = await collect(streamResponse(key, request(), attribution, new AbortController().signal, f.baseURL));
+  expect(result.error).toBeUndefined();
+  expect(result.parts).toEqual([text('hello')]);
+  const g = await service([...textStart, event('response.completed', { response: { id: 'resp_1', object: 'response', status: 'incomplete',
+    incomplete_details: { reason: 'max_output_tokens' }, error: null, output: [messageItem('hello')] } })]);
+  const second = await collect(streamResponse(key, request(), attribution, new AbortController().signal, g.baseURL));
+  expect(second.error).toBeUndefined();
+  expect(second.parts).toEqual([text('hello')]);
+});
+it('never lets a truncated turn execute a half-formed tool call', async () => {
+  const f = await service([
+    event('response.output_item.added', { output_index: 0, item: { id: 'fc_1', type: 'function_call', call_id: 'call-1', name: 'read_file', arguments: '' } }),
+    event('response.function_call_arguments.delta', { output_index: 0, item_id: 'fc_1', delta: '{"path"' }),
+    event('response.incomplete', { response: { status: 'incomplete', incomplete_details: { reason: 'max_output_tokens' } } }),
+  ]);
+  const result = await collect(streamResponse(key, request(), attribution, new AbortController().signal, f.baseURL));
+  expect(userMessage(result.error)).toContain('incomplete:function_call');
+});
+it('still fails closed on a stop reason it does not understand', async () => {
+  const f = await service([...textStart, event('response.incomplete', { response: { status: 'incomplete', incomplete_details: { reason: 'content_filter' } } })]);
+  const result = await collect(streamResponse(key, request(), attribution, new AbortController().signal, f.baseURL));
+  expect(result.error).toBeInstanceOf(LunaRouteError);
+});
+it('shows a fallback line when a turn produces nothing visible', async () => {
+  const item = { ...reasoning, encrypted_content: null, content: [{ type: 'reasoning_text', text: 'hidden reasoning' }] };
+  const f = await service([
+    event('response.output_item.added', { output_index: 0, item: { ...reasoning, encrypted_content: null, status: 'in_progress' } }),
+    event('response.reasoning_text.delta', { output_index: 0, item_id: 'rs_1', content_index: 0, delta: 'hidden reasoning' }),
+    event('response.output_item.done', { output_index: 0, item }), complete([item]),
+  ]);
+  const result = await collect(streamResponse(key, request(), attribution, new AbortController().signal, f.baseURL));
+  expect(result.error).toBeUndefined();
+  expect(result.parts.filter(part => part instanceof vscode.LanguageModelTextPart)).toEqual([text('LunaRoute returned no visible answer for this turn.')]);
+});
+it('tolerates a rebuilt terminal snapshot dropping a content-free streamed item', async () => {
+  const empty = { id: 'msg_empty', type: 'message', role: 'assistant', status: 'in_progress', content: [] };
+  const f = await service([
+    textStart[0],
+    event('response.output_text.delta', { item_id: 'msg_1', output_index: 0, content_index: 0, delta: 'hello' }),
+    event('response.output_item.added', { output_index: 1, item: empty }),
+    event('response.output_item.done', { output_index: 0, item: messageItem('hello') }),
+    complete([messageItem('hello')]),
+  ]);
+  const result = await collect(streamResponse(key, request(), attribution, new AbortController().signal, f.baseURL));
+  expect(result.error).toBeUndefined();
+  expect(result.parts).toEqual([text('hello')]);
+});
+it('still fails when a rebuilt terminal snapshot drops content that was streamed', async () => {
+  const f = await service([...textStart, event('response.output_item.done', { output_index: 0, item: messageItem('hello') }), complete([])]);
+  const result = await collect(streamResponse(key, request(), attribution, new AbortController().signal, f.baseURL));
+  expect(result.error).toBeInstanceOf(LunaRouteError);
+});
 it('validates real reasoning content/summary fragments without rendering them as answer text', async () => {
   const item = { ...reasoning, encrypted_content: null,
     content: [{ type: 'reasoning_text', text: 'hidden reasoning' }], summary: [{ type: 'summary_text', text: 'summary' }] };
@@ -386,8 +658,8 @@ it('validates real reasoning content/summary fragments without rendering them as
   ]);
   const result = await collect(streamResponse(key, request(), attribution, new AbortController().signal, f.baseURL));
   expect(result.error).toBeUndefined();
-  expect(result.parts).toHaveLength(1);
-  expect(result.parts[0]).toBeInstanceOf(vscode.LanguageModelDataPart);
+  expect(result.parts.filter(part => part instanceof vscode.LanguageModelDataPart)).toHaveLength(1);
+  expect(result.parts.filter(part => part instanceof vscode.LanguageModelTextPart)).toEqual([text('LunaRoute returned no visible answer for this turn.')]);
   expect(JSON.parse(new TextDecoder().decode((result.parts[0] as vscode.LanguageModelDataPart).data))).toEqual({ modelId: 'chat-a', item });
 });
 it.each(['part', 'item'])('rejects a late %s text suffix instead of reordering already-emitted content', async via => {

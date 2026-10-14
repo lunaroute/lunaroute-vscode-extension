@@ -3,13 +3,14 @@ import { readFileSync } from 'node:fs';
 import type { ExtensionContext } from 'vscode';
 import { afterEach, expect, it, vi } from 'vitest';
 import { activate, deactivate } from '../src/extension.js';
-import { CancellationTokenSource, commandHandlers, commands, deferred, env, lm, MemorySecrets, notices, preferences, registeredProviders } from './vscode.js';
+import { CancellationTokenSource, commandHandlers, commands, deferred, env, lm, mcpProviders, McpHttpServerDefinition, MemorySecrets, notices, preferences, registeredProviders } from './vscode.js';
 
 function context(secrets = new MemorySecrets(), extensionKind = 1) {
   return { secrets, subscriptions: [], extension: { extensionKind, packageJSON: { version: '0.1.0' } } } as unknown as ExtensionContext;
 }
 afterEach(() => {
   deactivate();
+  mcpProviders.clear();
   env.uiKind = 1;
   env.remoteName = undefined;
   notices.information.length = 0;
@@ -20,10 +21,35 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+it('offers the hosted MCP server only while connected, with the current key and attribution', async () => {
+  const secrets = new MemorySecrets();
+  await activate(context(secrets));
+  const provider = mcpProviders.get('lunaroute.mcp');
+  expect(provider).toBeDefined();
+  expect(await provider!.provideMcpServerDefinitions()).toEqual([]);
+  expect(await provider!.resolveMcpServerDefinition!(undefined)).toBeUndefined();
+
+  secrets.external('lunaroute.connection', JSON.stringify({ apiKey: 'lr_mcp_fixture_not_real', orgId: '00000000-0000-4000-8000-000000000001' }));
+  await vi.waitFor(async () => expect((await provider!.provideMcpServerDefinitions()).length).toBe(1));
+  const definition = (await provider!.provideMcpServerDefinitions())[0] as McpHttpServerDefinition;
+  expect(definition.label).toBe('LunaRoute');
+  expect(String(definition.uri)).toBe('https://mcp.lunaroute.com/mcp');
+  expect(definition.headers.Authorization).toBe('Bearer lr_mcp_fixture_not_real');
+  expect(definition.headers['lunaroute-agent']).toMatch(/^vscode\//);
+  expect(definition.headers['x-lunaroute-session']).toBe(definition.headers['lunaroute-session-id']);
+  expect(definition.version).toBe('0.1.0');
+
+  // A rotated key must reach the host without a restart, and sign-out stops offering the server.
+  secrets.external('lunaroute.connection', JSON.stringify({ apiKey: 'lr_mcp_rotated_not_real', orgId: '00000000-0000-4000-8000-000000000001' }));
+  await vi.waitFor(async () => expect(((await provider!.resolveMcpServerDefinition!(undefined)) as McpHttpServerDefinition)
+    .headers.Authorization).toBe('Bearer lr_mcp_rotated_not_real'));
+  secrets.external('lunaroute.connection', undefined);
+  await vi.waitFor(async () => expect(await provider!.resolveMcpServerDefinition!(undefined)).toBeUndefined());
+});
 it('silently activates with native commands and no credential-bearing exports', async () => {
   const exported = await activate(context());
   expect(exported).toBeUndefined();
-  expect([...commandHandlers.keys()].sort()).toEqual(['lunaroute.manage', 'lunaroute.refreshModels', 'lunaroute.signIn', 'lunaroute.signOut']);
+  expect([...commandHandlers.keys()].sort()).toEqual(['lunaroute.captureDiagnostics', 'lunaroute.manage', 'lunaroute.refreshModels', 'lunaroute.signIn', 'lunaroute.signOut']);
   expect(registeredProviders.has('lunaroute')).toBe(true);
   expect(env.openExternal).not.toHaveBeenCalled();
   expect(notices.information).toEqual([]);
