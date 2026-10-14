@@ -1,8 +1,8 @@
 {
   "name": "lunaroute",
-  "displayName": "LunaRoute",
-  "description": "LunaRoute models in native VS Code Chat and Agent mode",
-  "version": "0.1.1",
+  "displayName": "LunaRoute for VS Code",
+  "description": "LunaRoute models in native VS Code Chat and Agent - browser sign-in, no API keys to copy.",
+  "version": "0.1.2",
   "publisher": "lunaroute",
   "license": "MIT",
   "repository": {
@@ -12,7 +12,12 @@
   "preview": true,
   "keywords": [
     "lunaroute",
-    "language-models"
+    "ai",
+    "chat",
+    "agent",
+    "language models",
+    "byok",
+    "no api key"
   ],
   "engines": {
     "vscode": "^1.141.0"
