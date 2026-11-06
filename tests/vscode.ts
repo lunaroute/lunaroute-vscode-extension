@@ -72,6 +72,7 @@ export const commands = {
 };
 export const env = { uiKind: 1, remoteName: undefined as string | undefined,
   openExternal: vi.fn(async (_uri: { toString(): string }) => false),
+  asExternalUri: vi.fn(async (uri: { toString(): string }) => uri),
 };
 export const registeredProviders = new Map<string, LanguageModelChatProvider>();
 export class McpHttpServerDefinition {

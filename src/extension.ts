@@ -32,7 +32,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(runtime.disposable);
   const openExternal = async (url: string) => vscode.env.openExternal(vscode.Uri.parse(url));
   // A remote window reaches its browser callback through the host's port forwarding, not the raw loopback port.
-  const forward = remote === undefined ? undefined : (uri: vscode.Uri) => vscode.env.asExternalUri(uri);
+  // Only a copy actually running in the remote host needs that; a local-only copy keeps its listener on the
+  // machine with the browser, where forwarding it would aim the browser at a tunnel port nobody serves.
+  const forward = remote === undefined || remoteUiOnly ? undefined : (uri: vscode.Uri) => vscode.env.asExternalUri(uri);
   let auth: AuthController | undefined;
   let loading: Promise<AuthController> | undefined;
   let initializationFailure: LunaRouteError | undefined;

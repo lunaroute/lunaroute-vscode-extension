@@ -89,6 +89,17 @@ it('does not wait on the placement notice to finish activating', async () => {
   hold.resolve();
 });
 
+it('never forwards the callback for a local-only copy in a remote window', async () => {
+  // Its listener is already on the machine with the browser; forwarding it would send the browser to a
+  // tunnel port instead of the listener that is waiting.
+  env.remoteName = 'ssh-remote';
+  env.openExternal.mockResolvedValue(false);
+  await activate(context(new MemorySecrets(), 1));
+  await commands.executeCommand('lunaroute.signIn');
+  expect(env.asExternalUri).not.toHaveBeenCalled();
+  expect(notices.errors.join(' ')).toMatch(/connect|network/i);
+});
+
 it('registers providers from the workspace host in a local window', async () => {
   await activate(context(new MemorySecrets(), 2));
   expect(registeredProviders.has('lunaroute')).toBe(true);
