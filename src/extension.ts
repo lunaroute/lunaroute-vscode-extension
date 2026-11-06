@@ -118,7 +118,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     },
   });
   // A local-only copy in a remote window cannot serve that window's chat, so it contributes no server either.
-  if (!remoteUiOnly) try { resources.push(mcpChanged, registerMcp()); } catch { mcpChanged.dispose(); }
+  if (remoteUiOnly) mcpChanged.dispose();
+  else try { resources.push(mcpChanged, registerMcp()); } catch { mcpChanged.dispose(); }
   void getAuth().then(controller => {
     if (live()) resources.push(controller.onDidChange(() => mcpChanged.fire()));
   }, () => {});
