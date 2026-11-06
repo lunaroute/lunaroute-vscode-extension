@@ -18,7 +18,7 @@ with ZipFile(sys.argv[1]) as archive:
     assert set(names) <= required | optional, "Unexpected archive files: " + repr(set(names) - required - optional)
     manifest = json.loads(archive.read("extension/package.json"))
     assert manifest["main"] == "./dist/extension.cjs"
-    assert manifest["extensionKind"] == ["ui"]
+    assert manifest["extensionKind"] == ["workspace", "ui"], "Manifest must prefer the workspace host so a remote window uses the remote copy"
     assert "browser" not in manifest and "enabledApiProposals" not in manifest
     assert manifest["icon"] == "icon.png", "Manifest must reference the packaged icon"
     assert manifest["contributes"]["languageModelChatProviders"][0]["vendor"] == "lunaroute"

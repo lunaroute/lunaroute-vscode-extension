@@ -59,21 +59,39 @@ it('silently activates with native commands and no credential-bearing exports', 
   expect(manifest.contributes.languageModelChatProviders).toEqual([{ vendor: 'lunaroute', displayName: 'LunaRoute', managementCommand: 'lunaroute.manage' }]);
 });
 
-it.each(['ssh-remote', 'wsl', 'dev-container'])('permits UI placement in a desktop %s window', async remote => {
+it.each(['ssh-remote', 'wsl', 'dev-container'])('explains placement instead of registering providers from a local host in a %s window', async remote => {
   env.remoteName = remote;
-  await activate(context());
+  await activate(context(new MemorySecrets(), 1));
+  expect(registeredProviders.size).toBe(0);
+  expect(mcpProviders.size).toBe(0);
+  expect(notices.information.join(' ')).toMatch(/remote host/i);
+  expect(notices.errors).toEqual([]);
   expect(commandHandlers.has('lunaroute.signIn')).toBe(true);
-  expect(env.openExternal).not.toHaveBeenCalled();
 });
 
-it.each(['web', 'workspace'])('refuses unsupported %s placement before touching credentials', async placement => {
+it.each(['ssh-remote', 'wsl', 'dev-container'])('registers providers from the workspace host in a desktop %s window', async remote => {
+  env.remoteName = remote;
+  await activate(context(new MemorySecrets(), 2));
+  expect(registeredProviders.has('lunaroute')).toBe(true);
+  expect(mcpProviders.has('lunaroute.mcp')).toBe(true);
+  expect(notices.information).toEqual([]);
+  expect(notices.errors).toEqual([]);
+});
+
+it('registers providers from the workspace host in a local window', async () => {
+  await activate(context(new MemorySecrets(), 2));
+  expect(registeredProviders.has('lunaroute')).toBe(true);
+  expect(notices.information).toEqual([]);
+});
+
+it('refuses the browser workbench before touching credentials', async () => {
   const secrets = new MemorySecrets();
   const read = vi.spyOn(secrets, 'get');
-  if (placement === 'web') env.uiKind = 2;
-  await activate(context(secrets, placement === 'workspace' ? 2 : 1));
+  env.uiKind = 2;
+  await activate(context(secrets));
   expect(read).not.toHaveBeenCalled();
   expect(commandHandlers.size).toBe(0);
-  expect(notices.errors.join(' ')).toMatch(/desktop|local/i);
+  expect(notices.errors.join(' ')).toMatch(/desktop/i);
 });
 
 it('does not announce connection until secure storage completes', async () => {

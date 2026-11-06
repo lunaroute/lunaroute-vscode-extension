@@ -54,7 +54,10 @@ export class LanguageModelChatMessage {
 export const ExtensionKind = { UI: 1, Workspace: 2 };
 export const UIKind = { Desktop: 1, Web: 2 };
 export const ProgressLocation = { Notification: 15 };
-export const Uri = { parse: (value: string) => ({ toString: () => value }) };
+export const Uri = { parse: (value: string) => {
+  const url = new URL(value);
+  return { scheme: url.protocol.replace(':', ''), authority: url.host, path: url.pathname, toString: () => value };
+} };
 export const commandHandlers = new Map<string, (...args: unknown[]) => unknown>();
 export const commands = {
   registerCommand(id: string, handler: (...args: unknown[]) => unknown) {

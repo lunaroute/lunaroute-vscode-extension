@@ -18,7 +18,7 @@ afterEach(async () => {
   vi.useRealTimers();
 });
 
-async function fixture(secrets = new MemorySecrets()) {
+async function fixture(secrets = new MemorySecrets(), extra: Partial<Parameters<typeof createAuthController>[2]> = {}) {
   const called = deferred<void>();
   const service = {
     body: wire as unknown, status: 200, location: undefined as string | undefined,
@@ -52,7 +52,7 @@ async function fixture(secrets = new MemorySecrets()) {
     opened.resolve(url);
     return true;
   });
-  const controller = await createAuthController(secrets, opener, { apiUrl, hostname: 'test-desktop' });
+  const controller = await createAuthController(secrets, opener, { apiUrl, hostname: 'test-desktop', ...extra });
   controllers.push(controller);
   function begin() {
     const cancel = new CancellationTokenSource();
@@ -206,8 +206,7 @@ it('reports a browser-open failure and closes its listener', async () => {
   await expect(send(callback(f.urls[0]))).rejects.toBeDefined();
 });
 
-it.each(['cancel', 'dispose'])('closes the listener on %s', async action => {
-  const f = await fixture();
+it.each(['cancel', 'dispose'])('closes the listener on %s', async action => {  const f = await fixture();
   const login = f.begin();
   const target = callback(await f.opened);
   if (action === 'cancel') login.cancel.cancel(); else f.controller.dispose();
@@ -255,6 +254,80 @@ it('aborts an exchange at 15000 ms without retry', async () => {
   await expect(login.result).resolves.toMatchObject({ kind: 'network' });
   expect(f.service.requests).toHaveLength(1);
   gate.resolve();
+});
+
+describe('remote sign-in callback forwarding', () => {
+  it('advertises the forwarded callback port and accepts the browser-visible host', async () => {
+    const seen: string[] = [];
+    const f = await fixture(new MemorySecrets(), {
+      forward: async uri => {
+        seen.push(uri.authority);
+        const port = Number(new URL(uri.toString()).port) + 1000;
+        return { authority: `127.0.0.1:${port}` } as unknown as import('vscode').Uri;
+      },
+    });
+    const login = f.begin();
+    const authorize = await f.opened;
+    expect(seen).toHaveLength(1);
+    const loopback = seen[0];
+    expect(loopback).toMatch(/^127\.0\.0\.1:\d+$/);
+    expect(authorize.searchParams.get('port')).toBe(String(Number(loopback.split(':')[1]) + 1000));
+    const target = new URL(`http://${loopback}/callback`);
+    target.search = new URLSearchParams({ state: authorize.searchParams.get('state')!, code: 'forwarded-code' }).toString();
+    const response = await send(target, { headers: { Host: `127.0.0.1:${authorize.searchParams.get('port')}` } });
+    expect(response.status).toBe(200);
+    await expect(login.result).resolves.toBeUndefined();
+    expect(f.service.requests).toHaveLength(1);
+  });
+
+  it('accepts the loopback host when forwarding preserves the port', async () => {
+    const f = await fixture(new MemorySecrets(), { forward: async uri => uri });
+    const login = f.begin();
+    const authorize = await f.opened;
+    const target = callback(authorize);
+    expect((await send(target)).status).toBe(200);
+    await expect(login.result).resolves.toBeUndefined();
+    expect(JSON.parse((await f.secrets.get(key))!)).toEqual(connection);
+  });
+
+  it('rejects a foreign host header while forwarding, then accepts the real callback', async () => {
+    const seen: string[] = [];
+    const f = await fixture(new MemorySecrets(), { forward: async uri => {
+      seen.push(uri.authority);
+      return { authority: '127.0.0.1:45999' } as unknown as import('vscode').Uri;
+    } });
+    const login = f.begin();
+    const authorize = await f.opened;
+    const target = new URL(`http://${seen[0]}/callback`);
+    target.search = new URLSearchParams({ state: authorize.searchParams.get('state')!, code: 'forwarded-code' }).toString();
+    expect((await send(target, { headers: { Host: '127.0.0.1:45998' } })).status).toBe(400);
+    expect(f.service.requests).toHaveLength(0);
+    expect((await send(target, { headers: { Host: '127.0.0.1:45999' } })).status).toBe(200);
+    await expect(login.result).resolves.toBeUndefined();
+    expect(f.service.requests).toHaveLength(1);
+  });
+
+  it('fails with its own guidance when the forwarded callback is not loopback', async () => {
+    const f = await fixture(new MemorySecrets(), {
+      forward: async () => ({ authority: 'abc123-8080.devtunnels.ms:443' } as unknown as import('vscode').Uri),
+    });
+    const login = f.begin();
+    await expect(login.result).resolves.toMatchObject({ kind: 'callback' });
+    expect(f.opener).not.toHaveBeenCalled();
+    expect(f.service.requests).toHaveLength(0);
+    expect(await f.secrets.get(key)).toBeUndefined();
+  });
+
+  it('reports a forwarding failure without opening a browser or leaking its message', async () => {
+    const f = await fixture(new MemorySecrets(), {
+      forward: async () => { throw new Error('private forwarding diagnostic'); },
+    });
+    const login = f.begin();
+    const result = await login.result;
+    expect(result).toMatchObject({ kind: 'network' });
+    expect(String(result)).not.toContain('private');
+    expect(f.opener).not.toHaveBeenCalled();
+  });
 });
 
 describe('encrypted storage and connection epochs', () => {

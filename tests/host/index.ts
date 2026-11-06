@@ -47,13 +47,15 @@ export async function run(): Promise<void> {
     assert.ok(relative && !relative.startsWith('..') && !path.isAbsolute(relative), 'Product is loaded from the disposable VSIX installation, not development sources');
   }
   assert.equal(await product.activate(), undefined, 'Product must not export a credential/test API');
-  assert.equal(product.extensionKind, vscode.ExtensionKind.UI);
+  // Placement is asserted on the manifest, not the runtime kind: a local window serves the workspace itself,
+  // so the effective kind there is not evidence about remote windows.
+  assert.deepEqual(product.packageJSON.extensionKind, ['workspace', 'ui'], 'Manifest prefers the workspace host so a remote window runs the remote copy');
   assert.deepEqual(await vscode.lm.selectChatModels({ vendor: 'lunaroute' }), []);
   const commands = await vscode.commands.getCommands(true);
   for (const id of ['lunaroute.signIn', 'lunaroute.signOut', 'lunaroute.manage', 'lunaroute.refreshModels']) assert.ok(commands.includes(id), id);
   for (const id of ['lunaroute.signOut', 'lunaroute.refreshModels', 'lunaroute.manage']) await commandAndDismiss(id);
   assert.deepEqual(await vscode.lm.selectChatModels({ vendor: 'lunaroute' }), []);
-  console.log('PASS product signed-out activation/commands, local placement, no credential-bearing exports');
+  console.log('PASS product signed-out activation/commands, workspace-host manifest preference, no credential-bearing exports');
 
   const fixture = vscode.extensions.getExtension<ProbeAPI>('lunaroute-test.lunaroute-host-fixture');
   assert.ok(fixture);
