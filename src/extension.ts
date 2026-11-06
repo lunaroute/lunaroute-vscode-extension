@@ -11,10 +11,16 @@ let runtime: { disposable: vscode.Disposable; attribution: Attribution } | undef
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   deactivate();
   const current = generation;
-  if (vscode.env.uiKind !== vscode.UIKind.Desktop || context.extension.extensionKind !== vscode.ExtensionKind.UI) {
-    await vscode.window.showErrorMessage('LunaRoute requires the local desktop extension host. Install it locally, not in the remote workspace.');
+  if (vscode.env.uiKind !== vscode.UIKind.Desktop) {
+    await vscode.window.showErrorMessage('LunaRoute requires a desktop VS Code window. Browser-only VS Code is not supported.');
     return;
   }
+  const remote = vscode.env.remoteName;
+  // Chat resolves models in the extension host that serves the workspace. In a remote window that is the
+  // remote host, so a copy running locally cannot offer models there; it explains itself instead of
+  // advertising models that no remote chat can resolve. See docs/smoke-checklist.md.
+  const remoteUiOnly = remote !== undefined && context.extension.extensionKind !== vscode.ExtensionKind.Workspace;
+  const placementFailure = remoteUiOnly ? new LunaRouteError('placement') : undefined;
   const resources: vscode.Disposable[] = [];
   let closed = false;
   const live = () => !closed && current === generation;
@@ -25,6 +31,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   }) };
   context.subscriptions.push(runtime.disposable);
   const openExternal = async (url: string) => vscode.env.openExternal(vscode.Uri.parse(url));
+  // A remote window reaches its browser callback through the host's port forwarding, not the raw loopback port.
+  // Only a copy actually running in the remote host needs that; a local-only copy keeps its listener on the
+  // machine with the browser, where forwarding it would aim the browser at a tunnel port nobody serves.
+  const forward = remote === undefined || remoteUiOnly ? undefined : (uri: vscode.Uri) => vscode.env.asExternalUri(uri);
   let auth: AuthController | undefined;
   let loading: Promise<AuthController> | undefined;
   let initializationFailure: LunaRouteError | undefined;
@@ -40,7 +50,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     } finally { source.dispose(); }
   }
   function attachProvider(controller: AuthController) {
-    if (!live() || provider) return;
+    if (!live() || provider || remoteUiOnly) return;
     const nextCatalog = new Catalog(controller, attribution);
     const nextProvider = new LunaRouteProvider(controller, nextCatalog, attribution);
     try {
@@ -58,7 +68,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   async function getAuth(): Promise<AuthController> {
     if (!live()) throw new LunaRouteError('cancelled');
     if (auth) return auth;
-    loading ??= createAuthController(context.secrets, openExternal).then(created => {
+    loading ??= createAuthController(context.secrets, openExternal, forward ? { forward } : {}).then(created => {
       if (!live()) { created.dispose(); throw new LunaRouteError('cancelled'); }
       auth = created;
       initializationFailure = undefined;
@@ -107,7 +117,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       } catch { return undefined; }
     },
   });
-  try { resources.push(mcpChanged, registerMcp()); } catch { mcpChanged.dispose(); }
+  // A local-only copy in a remote window cannot serve that window's chat, so it contributes no server either.
+  if (remoteUiOnly) mcpChanged.dispose();
+  else try { resources.push(mcpChanged, registerMcp()); } catch { mcpChanged.dispose(); }
   void getAuth().then(controller => {
     if (live()) resources.push(controller.onDidChange(() => mcpChanged.fire()));
   }, () => {});
@@ -132,7 +144,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.commands.registerCommand('lunaroute.refreshModels', () => run(async () => {
       const controller = await getAuth();
       attachProvider(controller);
-      if (!catalog) throw providerFailure ?? new LunaRouteError('protocol');
+      if (!catalog) throw providerFailure ?? placementFailure ?? new LunaRouteError('protocol');
       if (!controller.snapshot().connection) throw new LunaRouteError('auth');
       await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'LunaRoute: Refresh Models', cancellable: true },
         async (_progress, token) => {
@@ -147,7 +159,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     })),
     vscode.commands.registerCommand('lunaroute.manage', () => run(async () => {
       const connection = auth?.snapshot().connection;
-      const failure = initializationFailure ?? providerFailure ?? catalog?.failure;
+      const failure = initializationFailure ?? providerFailure ?? catalog?.failure ?? placementFailure;
       const choices = [
         { label: 'Open dashboard', id: 'dashboard' },
         { label: connection && failure?.kind !== 'auth' ? 'Change connection' : 'Sign In', id: 'lunaroute.signIn' },
@@ -165,6 +177,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   );
   try { await getAuth(); void warmModels(); }
   catch { /* Explicit commands and management retain secure-storage recovery. */ }
+  // Say once per window why this copy is inert, instead of leaving an unexplained empty model picker.
+  // Not awaited: the host resolves this promise only when the user dismisses the toast, and nothing that
+  // waits for activation should wait for a human.
+  if (remoteUiOnly && live()) void vscode.window.showWarningMessage(userMessage(placementFailure!));
 }
 
 export function deactivate(): void {

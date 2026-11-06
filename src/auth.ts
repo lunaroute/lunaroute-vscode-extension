@@ -14,6 +14,35 @@ export interface AuthController extends vscode.Disposable {
 }
 const SECRET = 'lunaroute.connection';
 const cancelled = () => new LunaRouteError('cancelled');
+interface AuthDeps {
+  fetch?: typeof fetch; apiUrl?: string; frontUrl?: string; hostname?: string;
+  /**
+   * Registers the loopback callback with the host so a browser on another machine can reach it. Remote
+   * windows pass `vscode.env.asExternalUri`; the returned authority is what the browser actually dials.
+   */
+  forward?: (uri: vscode.Uri) => PromiseLike<vscode.Uri>;
+}
+const isLoopback = (host: string | undefined) => host === '127.0.0.1' || host === 'localhost';
+/**
+ * Works out which authorities the callback may arrive with. Locally that is the bound loopback port; in a
+ * remote window the host forwards the port and the browser sends the forwarded authority instead.
+ */
+async function callbackTarget(port: number, forward: AuthDeps['forward'], signal: AbortSignal) {
+  const loopback = `127.0.0.1:${port}`;
+  if (!forward) return { hosts: new Set([loopback]), port: String(port) };
+  let external: vscode.Uri;
+  try { external = await abortable(Promise.resolve(forward(vscode.Uri.parse(`http://${loopback}/callback`))), signal); }
+  catch (error) { throw signal.aborted ? abortReason(signal) : error instanceof LunaRouteError ? error : new LunaRouteError('network'); }
+  // The browser reaches the callback as 127.0.0.1 (that is what the device-auth page redirects to), so a
+  // forwarded tunnel host can never deliver it, and the forwarded authority is accepted in that spelling only.
+  const match = /^([^:/]+):(\d{1,5})$/.exec(external?.authority ?? '');
+  const host = match?.[1]?.toLowerCase();
+  const forwarded = match?.[2];
+  if (!forwarded || !isLoopback(host) || Number(forwarded) < 1 || Number(forwarded) > 65535) {
+    throw new LunaRouteError('callback');
+  }
+  return { hosts: new Set([loopback, `127.0.0.1:${forwarded}`]), port: forwarded };
+}
 function parseConnection(value: unknown, exchange = false): Connection {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new LunaRouteError('protocol');
   const record = value as Record<string, unknown>;
@@ -31,12 +60,14 @@ function storedConnection(raw: string | undefined): Connection | undefined {
   catch { return undefined; }
 }
 
-async function browserCode(signal: AbortSignal, openExternal: (url: string) => Promise<boolean>, frontUrl: string) {
+async function browserCode(signal: AbortSignal, openExternal: (url: string) => Promise<boolean>, frontUrl: string,
+  forward: AuthDeps['forward']) {
   if (signal.aborted) throw abortReason(signal);
   const verifier = randomBytes(32).toString('hex');
   const state = randomBytes(16).toString('hex');
   const origin = new URL(frontUrl).origin;
   let authority = '';
+  let hosts = new Set<string>([]);
   let used = false;
   let receive!: (code: string) => void;
   const received = new Promise<string>(resolve => { receive = resolve; });
@@ -48,7 +79,7 @@ async function browserCode(signal: AbortSignal, openExternal: (url: string) => P
     res.setHeader('Connection', 'close');
     const reject = (status: number) => { res.statusCode = status; res.end('Invalid or expired callback. Return to VS Code.'); };
     const hostCount = req.rawHeaders.filter((header, index) => index % 2 === 0 && header.toLowerCase() === 'host').length;
-    if (hostCount !== 1 || req.headers.host !== authority || req.url?.split('?')[0] !== '/callback' || req.url.includes('#')) return reject(400);
+    if (hostCount !== 1 || !hosts.has(req.headers.host ?? '') || req.url?.split('?')[0] !== '/callback' || req.url.includes('#')) return reject(400);
     if (req.headers.origin !== undefined && req.headers.origin !== origin) return reject(403);
     if (req.headers.origin === origin) {
       res.setHeader('Access-Control-Allow-Origin', origin);
@@ -83,8 +114,11 @@ async function browserCode(signal: AbortSignal, openExternal: (url: string) => P
     const address = server.address();
     if (!address || typeof address === 'string') throw new LunaRouteError('network');
     authority = `127.0.0.1:${address.port}`;
+    const target = await callbackTarget(address.port, forward, signal);
+    hosts = target.hosts;
+    if (signal.aborted) throw abortReason(signal);
     const url = new URL('/device-auth/vscode', frontUrl);
-    url.search = new URLSearchParams({ port: String(address.port), state, challenge: createHash('sha256').update(verifier).digest('hex') }).toString();
+    url.search = new URLSearchParams({ port: target.port, state, challenge: createHash('sha256').update(verifier).digest('hex') }).toString();
     if (!await abortable(openExternal(url.toString()), signal)) throw new LunaRouteError('network');
     return { code: await abortable(received, signal), verifier };
   } finally {
@@ -96,7 +130,7 @@ async function browserCode(signal: AbortSignal, openExternal: (url: string) => P
 export async function createAuthController(
   secrets: vscode.SecretStorage,
   openExternal: (url: string) => Promise<boolean>,
-  deps: { fetch?: typeof fetch; apiUrl?: string; frontUrl?: string; hostname?: string } = {},
+  deps: AuthDeps = {},
 ): Promise<AuthController> {
   const changes = new vscode.EventEmitter<void>();
   let knownRaw: string | undefined;
@@ -180,7 +214,7 @@ export async function createAuthController(
       if (token.isCancellationRequested) login.abort(cancelled());
       const timeout = setTimeout(() => { if (!committed) login.abort(new LunaRouteError('network', 408)); }, LOGIN_TIMEOUT_MS);
       try {
-        const approval = await browserCode(login.signal, openExternal, deps.frontUrl ?? FRONT_URL);
+        const approval = await browserCode(login.signal, openExternal, deps.frontUrl ?? FRONT_URL, deps.forward);
         check();
         const exchange = new AbortController();
         const signal = AbortSignal.any([login.signal, exchange.signal]);

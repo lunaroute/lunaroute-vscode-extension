@@ -4,7 +4,7 @@
 
 Pick a LunaRoute model in the same model picker you already use, work in Chat or Agent mode, and let VS Code keep owning tools, approvals and workspace access. One sign-in connects the organization your plan belongs to.
 
-> **Preview.** This extension is in active preview. Verified today: sign-in and native Chat on desktop VS Code 1.141 (Linux), model discovery, streaming, tool calls, and LunaRoute's hosted tools through MCP. Still being validated: Windows and macOS extension hosts, remote workspaces (SSH/WSL/Dev Containers), long Agent sessions with tool history, and Marketplace install paths. Details and current evidence live in the repository's smoke checklist.
+> **Preview.** This extension is in active preview. Verified today: sign-in and native Chat on desktop VS Code 1.141 (Linux), model discovery, streaming, tool calls, and LunaRoute's hosted tools through MCP. Remote SSH windows are verified on VS Code 1.145.2 with LunaRoute installed in the remote host and a **Local** harness session. Still being validated: Windows and macOS extension hosts, WSL and Dev Containers, signing in from inside a remote window, long Agent sessions with tool history, and Marketplace install paths. Details and current evidence live in the repository's smoke checklist.
 
 ## What you get
 
@@ -34,10 +34,20 @@ Commands you'll actually use:
 
 ## Requirements
 
-- **Desktop VS Code 1.141+**, extension installed in the **local (UI) host**. Browser-only VS Code (`vscode.dev`) is not supported; on Remote SSH / WSL / Dev Containers install it locally, not in the container.
+- **Desktop VS Code 1.141+**, installed wherever that window runs its chat: locally for a local window, and **in the remote host** for a Remote SSH / WSL / Dev Container window (see below). Browser-only VS Code (`vscode.dev`) is not supported.
 - A **browser on the same computer** as VS Code — sign-in briefly listens on `127.0.0.1` for the callback.
 - A **LunaRoute account** with the organization that should pay for the usage.
-- Network access to `app.lunaroute.com`, `api.lunaroute.com`, `gw.lunaroute.com` and `mcp.lunaroute.com`.
+- Network access to `app.lunaroute.com`, `api.lunaroute.com`, `gw.lunaroute.com` and `mcp.lunaroute.com` from the host that runs the extension.
+
+## Remote windows (SSH, WSL, Dev Containers)
+
+Chat resolves models in the extension host that serves the workspace. In a remote window that host is on the remote machine, so LunaRoute has to be installed there:
+
+1. Connect to the host, then install LunaRoute **in the remote host** — **Install in SSH: &lt;host&gt;** from the Extensions view, or **Install from VSIX...** while that window is connected.
+2. In Chat, set **Session Target** to **Local**. The Copilot harness runs in the Agent Host, which cannot load extension-provided model providers yet ([microsoft/vscode#332085](https://github.com/microsoft/vscode/issues/332085)).
+3. Sign in once. VS Code keeps the credential on the client, so windows on this machine share it — including a remote host you already signed in from locally.
+
+If LunaRoute is installed only locally, it says so in the remote window instead of listing models that window cannot resolve.
 
 ## Credentials, privacy and limits
 
@@ -58,6 +68,9 @@ Commands you'll actually use:
 | 402 / billing | Open **Manage → dashboard** and finish the connected organization's plan setup. |
 | 429 / rate limited | Wait for the stated retry interval, then retry explicitly — nothing retries for you. |
 | No models listed | **LunaRoute: Refresh Models**; check connectivity to `gw.lunaroute.com`. |
+| No LunaRoute models in a Remote SSH / WSL / Dev Container window | Install LunaRoute **in the remote host** (Extensions → **Install in SSH: &lt;host&gt;**), then reload the window. A local-only copy explains itself instead of listing models. |
+| Selected a LunaRoute model in a remote window and it reports the model is not available | That session uses the Copilot harness; switch **Session Target** to **Local**. |
+| Remote sign-in reports it could not reach the callback | The forwarded loopback callback did not arrive as `127.0.0.1`. Sign in from a local window instead — the credential is shared — or retry the remote sign-in. |
 | “unsupported or oversized input” | Reduce the input or start a new chat — unsupported history fails explicitly rather than disappearing. |
 | MCP tools missing | **`MCP: List Servers`** → enable **LunaRoute**. If it reports unavailable, check its output before editing `mcp.json` by hand. |
 | Something else | Run **LunaRoute: Capture Chat Diagnostics (Preview)**, reproduce once, and send the captured files to LunaRoute support. |

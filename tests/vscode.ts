@@ -54,7 +54,10 @@ export class LanguageModelChatMessage {
 export const ExtensionKind = { UI: 1, Workspace: 2 };
 export const UIKind = { Desktop: 1, Web: 2 };
 export const ProgressLocation = { Notification: 15 };
-export const Uri = { parse: (value: string) => ({ toString: () => value }) };
+export const Uri = { parse: (value: string) => {
+  const url = new URL(value);
+  return { scheme: url.protocol.replace(':', ''), authority: url.host, path: url.pathname, toString: () => value };
+} };
 export const commandHandlers = new Map<string, (...args: unknown[]) => unknown>();
 export const commands = {
   registerCommand(id: string, handler: (...args: unknown[]) => unknown) {
@@ -69,6 +72,7 @@ export const commands = {
 };
 export const env = { uiKind: 1, remoteName: undefined as string | undefined,
   openExternal: vi.fn(async (_uri: { toString(): string }) => false),
+  asExternalUri: vi.fn(async (uri: { toString(): string }) => uri),
 };
 export const registeredProviders = new Map<string, LanguageModelChatProvider>();
 export class McpHttpServerDefinition {
@@ -98,11 +102,15 @@ export const workspace = { getConfiguration(section = '') {
     async update(key: string, value: unknown) { preferences.set(`${section}.${key}`, value); } };
 } };
 export const notices = { information: [] as string[], errors: [] as string[], nextPick: undefined as string | undefined,
-  picks: [] as { items: readonly { label: string }[]; options: unknown }[] };
+  picks: [] as { items: readonly { label: string }[]; options: unknown }[],
+  warningHold: undefined as Promise<void> | undefined };
 export const pickedFolders: { fsPath: string }[] = [];
 export const window = {
   async showInformationMessage(message: string) { notices.information.push(message); },
-  async showWarningMessage(message: string) { notices.information.push(message); },
+  showWarningMessage(message: string) {
+    notices.information.push(message);
+    return notices.warningHold ?? Promise.resolve();
+  },
   async showOpenDialog() { return pickedFolders; },
   async showErrorMessage(message: string) { notices.errors.push(message); },
   async showQuickPick<T extends { label: string }>(items: readonly T[], options?: unknown) {
