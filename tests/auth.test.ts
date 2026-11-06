@@ -258,13 +258,15 @@ it('aborts an exchange at 15000 ms without retry', async () => {
 });
 
 describe('remote sign-in callback forwarding', () => {
+  // A forwarded port must stay valid whatever the OS assigned; ephemeral ports reach 65535.
+  const shift = (port: number) => (port > 60000 ? port - 1000 : port + 1000);
+
   it('advertises the forwarded callback port and accepts the browser-visible host', async () => {
     const seen: string[] = [];
     const f = await fixture(new MemorySecrets(), {
       forward: async uri => {
         seen.push(uri.authority);
-        const port = Number(new URL(uri.toString()).port) + 1000;
-        return { authority: `127.0.0.1:${port}` } as unknown as import('vscode').Uri;
+        return { authority: `127.0.0.1:${shift(Number(new URL(uri.toString()).port))}` } as unknown as import('vscode').Uri;
       },
     });
     const login = f.begin();
@@ -272,7 +274,7 @@ describe('remote sign-in callback forwarding', () => {
     expect(seen).toHaveLength(1);
     const loopback = seen[0];
     expect(loopback).toMatch(/^127\.0\.0\.1:\d+$/);
-    expect(authorize.searchParams.get('port')).toBe(String(Number(loopback.split(':')[1]) + 1000));
+    expect(authorize.searchParams.get('port')).toBe(String(shift(Number(loopback.split(':')[1]))));
     const target = new URL(`http://${loopback}/callback`);
     target.search = new URLSearchParams({ state: authorize.searchParams.get('state')!, code: 'forwarded-code' }).toString();
     const response = await send(target, { headers: { Host: `127.0.0.1:${authorize.searchParams.get('port')}` } });
@@ -301,7 +303,7 @@ describe('remote sign-in callback forwarding', () => {
     const authorize = await f.opened;
     const target = new URL(`http://${seen[0]}/callback`);
     target.search = new URLSearchParams({ state: authorize.searchParams.get('state')!, code: 'forwarded-code' }).toString();
-    expect((await send(target, { headers: { Host: '127.0.0.1:45998' } })).status).toBe(400);
+    expect((await send(target, { headers: { Host: 'evil.test:45999' } })).status).toBe(400);
     expect(f.service.requests).toHaveLength(0);
     expect((await send(target, { headers: { Host: '127.0.0.1:45999' } })).status).toBe(200);
     await expect(login.result).resolves.toBeUndefined();
@@ -314,7 +316,7 @@ describe('remote sign-in callback forwarding', () => {
     const f = await fixture(new MemorySecrets(), {
       forward: async uri => {
         seen.push(uri.authority);
-        return { authority: `localhost:${Number(new URL(uri.toString()).port) + 1000}` } as unknown as import('vscode').Uri;
+        return { authority: `localhost:${shift(Number(new URL(uri.toString()).port))}` } as unknown as import('vscode').Uri;
       },
     });
     const login = f.begin();
