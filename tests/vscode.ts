@@ -101,11 +101,15 @@ export const workspace = { getConfiguration(section = '') {
     async update(key: string, value: unknown) { preferences.set(`${section}.${key}`, value); } };
 } };
 export const notices = { information: [] as string[], errors: [] as string[], nextPick: undefined as string | undefined,
-  picks: [] as { items: readonly { label: string }[]; options: unknown }[] };
+  picks: [] as { items: readonly { label: string }[]; options: unknown }[],
+  warningHold: undefined as Promise<void> | undefined };
 export const pickedFolders: { fsPath: string }[] = [];
 export const window = {
   async showInformationMessage(message: string) { notices.information.push(message); },
-  async showWarningMessage(message: string) { notices.information.push(message); },
+  showWarningMessage(message: string) {
+    notices.information.push(message);
+    return notices.warningHold ?? Promise.resolve();
+  },
   async showOpenDialog() { return pickedFolders; },
   async showErrorMessage(message: string) { notices.errors.push(message); },
   async showQuickPick<T extends { label: string }>(items: readonly T[], options?: unknown) {

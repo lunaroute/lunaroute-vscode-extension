@@ -175,7 +175,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   try { await getAuth(); void warmModels(); }
   catch { /* Explicit commands and management retain secure-storage recovery. */ }
   // Say once per window why this copy is inert, instead of leaving an unexplained empty model picker.
-  if (remoteUiOnly && live()) await vscode.window.showWarningMessage(userMessage(placementFailure!));
+  // Not awaited: the host resolves this promise only when the user dismisses the toast, and nothing that
+  // waits for activation should wait for a human.
+  if (remoteUiOnly && live()) void vscode.window.showWarningMessage(userMessage(placementFailure!));
 }
 
 export function deactivate(): void {

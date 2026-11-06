@@ -78,6 +78,17 @@ it.each(['ssh-remote', 'wsl', 'dev-container'])('registers providers from the wo
   expect(notices.errors).toEqual([]);
 });
 
+it('does not wait on the placement notice to finish activating', async () => {
+  const hold = deferred<void>();
+  notices.warningHold = hold.promise;
+  env.remoteName = 'ssh-remote';
+  const activation = activate(context(new MemorySecrets(), 1)).then(() => 'activated' as const);
+  await expect(Promise.race([activation, new Promise(resolve => { setTimeout(() => resolve('pending' as const), 100); })]))
+    .resolves.toBe('activated');
+  expect(notices.information.join(' ')).toMatch(/remote host/i);
+  hold.resolve();
+});
+
 it('registers providers from the workspace host in a local window', async () => {
   await activate(context(new MemorySecrets(), 2));
   expect(registeredProviders.has('lunaroute')).toBe(true);

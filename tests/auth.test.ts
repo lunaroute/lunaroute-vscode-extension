@@ -206,7 +206,8 @@ it('reports a browser-open failure and closes its listener', async () => {
   await expect(send(callback(f.urls[0]))).rejects.toBeDefined();
 });
 
-it.each(['cancel', 'dispose'])('closes the listener on %s', async action => {  const f = await fixture();
+it.each(['cancel', 'dispose'])('closes the listener on %s', async action => {
+  const f = await fixture();
   const login = f.begin();
   const target = callback(await f.opened);
   if (action === 'cancel') login.cancel.cancel(); else f.controller.dispose();
@@ -303,6 +304,25 @@ describe('remote sign-in callback forwarding', () => {
     expect((await send(target, { headers: { Host: '127.0.0.1:45998' } })).status).toBe(400);
     expect(f.service.requests).toHaveLength(0);
     expect((await send(target, { headers: { Host: '127.0.0.1:45999' } })).status).toBe(200);
+    await expect(login.result).resolves.toBeUndefined();
+    expect(f.service.requests).toHaveLength(1);
+  });
+
+  it('accepts the forwarded port under either loopback spelling the browser may send', async () => {
+    // VS Code may hand back `localhost:<port>`; the device-auth page still redirects to 127.0.0.1.
+    const seen: string[] = [];
+    const f = await fixture(new MemorySecrets(), {
+      forward: async uri => {
+        seen.push(uri.authority);
+        return { authority: `localhost:${Number(new URL(uri.toString()).port) + 1000}` } as unknown as import('vscode').Uri;
+      },
+    });
+    const login = f.begin();
+    const authorize = await f.opened;
+    const forwardedPort = authorize.searchParams.get('port')!;
+    const target = new URL(`http://${seen[0]}/callback`);
+    target.search = new URLSearchParams({ state: authorize.searchParams.get('state')!, code: 'forwarded-code' }).toString();
+    expect((await send(target, { headers: { Host: `127.0.0.1:${forwardedPort}` } })).status).toBe(200);
     await expect(login.result).resolves.toBeUndefined();
     expect(f.service.requests).toHaveLength(1);
   });

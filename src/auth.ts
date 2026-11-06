@@ -40,7 +40,7 @@ async function callbackTarget(port: number, forward: AuthDeps['forward'], signal
   if (!forwarded || !isLoopback(host) || Number(forwarded) < 1 || Number(forwarded) > 65535) {
     throw new LunaRouteError('callback');
   }
-  return { hosts: new Set([loopback, `${host}:${forwarded}`]), port: forwarded };
+  return { hosts: new Set([loopback, `127.0.0.1:${forwarded}`, `localhost:${forwarded}`]), port: forwarded };
 }
 function parseConnection(value: unknown, exchange = false): Connection {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new LunaRouteError('protocol');
