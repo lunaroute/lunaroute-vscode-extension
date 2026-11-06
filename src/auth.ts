@@ -33,14 +33,15 @@ async function callbackTarget(port: number, forward: AuthDeps['forward'], signal
   let external: vscode.Uri;
   try { external = await abortable(Promise.resolve(forward(vscode.Uri.parse(`http://${loopback}/callback`))), signal); }
   catch (error) { throw signal.aborted ? abortReason(signal) : error instanceof LunaRouteError ? error : new LunaRouteError('network'); }
-  // The browser reaches the callback as 127.0.0.1, so a forwarded tunnel host can never deliver it.
+  // The browser reaches the callback as 127.0.0.1 (that is what the device-auth page redirects to), so a
+  // forwarded tunnel host can never deliver it, and the forwarded authority is accepted in that spelling only.
   const match = /^([^:/]+):(\d{1,5})$/.exec(external?.authority ?? '');
   const host = match?.[1]?.toLowerCase();
   const forwarded = match?.[2];
   if (!forwarded || !isLoopback(host) || Number(forwarded) < 1 || Number(forwarded) > 65535) {
     throw new LunaRouteError('callback');
   }
-  return { hosts: new Set([loopback, `127.0.0.1:${forwarded}`, `localhost:${forwarded}`]), port: forwarded };
+  return { hosts: new Set([loopback, `127.0.0.1:${forwarded}`]), port: forwarded };
 }
 function parseConnection(value: unknown, exchange = false): Connection {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new LunaRouteError('protocol');

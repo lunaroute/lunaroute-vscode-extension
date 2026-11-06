@@ -310,8 +310,9 @@ describe('remote sign-in callback forwarding', () => {
     expect(f.service.requests).toHaveLength(1);
   });
 
-  it('accepts the forwarded port under either loopback spelling the browser may send', async () => {
-    // VS Code may hand back `localhost:<port>`; the device-auth page still redirects to 127.0.0.1.
+  it('accepts a forwarded authority advertised as localhost while the browser dials 127.0.0.1', async () => {
+    // VS Code may hand back `localhost:<port>`; the device-auth page still redirects to 127.0.0.1, so the
+    // request that must succeed is the 127.0.0.1 one at the forwarded port.
     const seen: string[] = [];
     const f = await fixture(new MemorySecrets(), {
       forward: async uri => {

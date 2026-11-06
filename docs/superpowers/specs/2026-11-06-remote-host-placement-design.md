@@ -117,8 +117,10 @@ loopback, so:
   machine with the browser and the behavior is byte-identical to before.
 - The forwarded **port** is what the device-auth page is told to redirect to, because that is the port
   the browser dials.
-- The listener accepts exactly two `Host` values: the bound loopback authority and the forwarded
-  authority. Anything else is still a 400.
+- The listener accepts at most two exact `Host` values: the bound loopback authority and
+  `127.0.0.1:<forwarded port>` (one value when the forwarded port is the bound port). Both are
+  `127.0.0.1`, because that is the address the device-auth page redirects the browser to. Anything else
+  is still a 400.
 - A forwarded authority that is not `127.0.0.1` / `localhost` (a tunnel host, where the browser cannot
   use a loopback callback at all) fails immediately as `callback`: "LunaRoute could not reach the
   sign-in callback through this remote connection. Try again, or sign in from a local window." The
