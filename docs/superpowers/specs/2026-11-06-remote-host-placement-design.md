@@ -112,8 +112,9 @@ port. On the desktop that is direct. From a remote host the browser cannot reach
 loopback, so:
 
 - `src/auth.ts` resolves the callback authority through an injected `deps.forward`; `src/extension.ts`
-  supplies `vscode.env.asExternalUri` **only** when `env.remoteName` is set. Locally the behavior is
-  byte-identical to before.
+  supplies `vscode.env.asExternalUri` **only** for a copy running in the remote host (a remote window with
+  `extensionKind` Workspace). Locally, and for a local-only copy in a remote window, the listener is on the
+  machine with the browser and the behavior is byte-identical to before.
 - The forwarded **port** is what the device-auth page is told to redirect to, because that is the port
   the browser dials.
 - The listener accepts exactly two `Host` values: the bound loopback authority and the forwarded

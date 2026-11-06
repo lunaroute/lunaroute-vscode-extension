@@ -13,6 +13,9 @@ afterEach(() => {
   mcpProviders.clear();
   env.uiKind = 1;
   env.remoteName = undefined;
+  env.asExternalUri.mockClear();
+  env.asExternalUri.mockImplementation(async (uri: { toString(): string }) => uri);
+  notices.warningHold = undefined;
   notices.information.length = 0;
   notices.errors.length = 0;
   notices.nextPick = undefined;
@@ -87,6 +90,17 @@ it('does not wait on the placement notice to finish activating', async () => {
     .resolves.toBe('activated');
   expect(notices.information.join(' ')).toMatch(/remote host/i);
   hold.resolve();
+});
+
+it('forwards the callback from a workspace copy in a remote window', async () => {
+  env.remoteName = 'ssh-remote';
+  env.asExternalUri.mockImplementation(async () => ({ authority: '127.0.0.1:40001', toString: () => 'http://127.0.0.1:40001/callback' }));
+  const opened: string[] = [];
+  env.openExternal.mockImplementation(async uri => { opened.push(uri.toString()); return false; });
+  await activate(context(new MemorySecrets(), 2));
+  await commands.executeCommand('lunaroute.signIn');
+  expect(env.asExternalUri).toHaveBeenCalledTimes(1);
+  expect(new URL(opened[0]).searchParams.get('port')).toBe('40001');
 });
 
 it('never forwards the callback for a local-only copy in a remote window', async () => {
