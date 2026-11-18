@@ -1,6 +1,6 @@
 export interface Attribution { version: string; sessionId: string }
 export type FailureKind = 'auth' | 'policy' | 'billing' | 'rate-limit' | 'network'
-  | 'upstream' | 'storage' | 'input' | 'protocol' | 'cancelled';
+  | 'upstream' | 'storage' | 'input' | 'protocol' | 'cancelled' | 'callback' | 'placement';
 export class LunaRouteError extends Error {
   constructor(readonly kind: FailureKind, readonly status?: number, readonly retryAfterSeconds?: number,
     /** Protocol metadata for support (event/item names). Never carries prompts or content. */
@@ -52,6 +52,11 @@ export function userMessage(error: unknown): string {
     input: 'This chat contains unsupported or oversized input. Reduce it or start a new chat.',
     protocol: 'LunaRoute returned an unsupported response. Try again or start a fresh sign-in.',
     cancelled: 'LunaRoute operation cancelled.',
+    // The sign-in listener is bound to the host running this extension; a remote window that cannot forward
+    // that loopback port back to the browser cannot complete the callback.
+    callback: 'LunaRoute could not reach the sign-in callback through this remote connection. Try again, or sign in from a local window.',
+    // Chat resolves models in the host that serves the workspace, so a local-only install cannot serve a remote window.
+    placement: 'LunaRoute runs locally; this remote window needs LunaRoute installed in the remote host (Extensions: Install in SSH/WSL/Container) to use its models.',
   };
   if (error.kind === 'rate-limit' && error.retryAfterSeconds !== undefined
     && Number.isSafeInteger(error.retryAfterSeconds) && error.retryAfterSeconds >= 0) {

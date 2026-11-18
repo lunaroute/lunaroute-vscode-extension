@@ -25,6 +25,7 @@
   "type": "module",
   "main": "./dist/extension.cjs",
   "extensionKind": [
+    "workspace",
     "ui"
   ],
   "activationEvents": [

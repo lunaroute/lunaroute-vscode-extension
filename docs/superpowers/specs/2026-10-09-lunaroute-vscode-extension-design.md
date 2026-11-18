@@ -28,6 +28,13 @@ Explicit non-goals:
 
 ## Architecture
 
+> **Superseded in part (2026-11-06):** `extensionKind` is now
+> `["workspace", "ui"]`. Chat resolves models in the extension host that serves the
+> workspace, so a remote window needs the copy installed in the remote host; a
+> UI-host copy in a remote window registers nothing and explains placement. See
+> `docs/smoke-checklist.md` ("Remote SSH placement — 2026-11-06"). Everything
+> else below still holds.
+
 Ship one TypeScript extension with a Node entry point and
 `extensionKind: ["ui"]`. It runs on the desktop even when the workspace is
 remote. Browser authorization, credential access, catalog discovery, and

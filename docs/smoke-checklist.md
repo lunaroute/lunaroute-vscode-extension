@@ -44,6 +44,30 @@ The existing bootstrap CI [run 38109493288](https://github.com/lunaroute/lunarou
 
 Official installation research is linked in README: VSIX installs default to manual updates; private repository downloads require repository access; draft releases require push access; Marketplace publication is separate from GitHub repository ownership. The new repository resolves the repository-bootstrap gate, not Marketplace ownership or live compatibility.
 
+## Remote SSH placement — 2026-11-06
+
+Chat resolves models in the extension host that serves the workspace. In a remote window that is the remote host, so `extensionKind` now prefers `workspace` and the extension must be installed in the SSH/WSL/container host. A copy that runs locally in a remote window registers no provider and no MCP server, and warns once with `userMessage(new LunaRouteError('placement'))`.
+
+| Environment / build | Expected | Actual / evidence |
+| --- | --- | --- |
+| VS Code **1.145.2** desktop client (macOS arm64), Remote-SSH host `legacy` (macOS arm64, `extensionKind: ["workspace","ui"]`, VSIX installed in the remote host, probe instrumentation) | Provider registers in the remote extension host and inference streams there | `remoteexthost` log: `placement uiKind=1 remoteName=ssh-remote extensionKind=2 vscode=1.145.2 kind=desktop`; `secrets.has=true`; `selectChatModels({"vendor":"lunaroute"}) -> 10`; `selectChatModels({}) -> 13` (`copilotcli/auto`, 10 LunaRoute, `copilot/gpt-4o-mini`, `copilot/auto`); `self-test: streamed "probe-ok"`. The local host did not also register in that session. |
+| Same window, owner-driven UI check | A Local-harness chat request answered | Owner sent a chat message in the SSH window and received an answer. Session target was **Local**. |
+| Remote sign-in callback forwarding | Unit-verified only | `tests/auth.test.ts` covers the forwarded authority (`port` param + accepted `Host`), a foreign `Host` rejection, a non-loopback (tunnel) forwarded authority failing as `callback`, and a forwarding failure surfacing as `network` without leaking its message. No live browser round trip from inside a remote window has been run. |
+
+Copy that carried over: the remote host read the connection saved by a local sign-in (`secrets.has=true` before any remote sign-in), consistent with the documented client-side SecretStorage storage. A fresh machine, or a remote host with no prior local sign-in, still needs the remote sign-in path above.
+
+Probe instrumentation (`[lunaroute-probe]` logging, a `~/.lunaroute-probe` self-test marker, and a `remote.extensionKind` override used to force the remote copy) was removed after the run; it is never part of a shipped build.
+
+### Shipped build, no override — 2026-11-06 14:39 (local time)
+
+The packaged VSIX (v0.1.2, `extensionKind: ["workspace","ui"]`) was installed in both hosts, then the SSH window was reloaded with no `remote.extensionKind` override:
+
+- The **remote** host ran the extension (`ExtensionService#_doActivateExtension lunaroute.lunaroute` at 14:39:37, host `exthost9`), and that host emitted **no** `LanguageModelProxy` warnings — the failure mode this change removes.
+- The **local** host did not activate the extension in that window (its last activation in that window's log is 10:34), so exactly one provider registered and the workspace preference in the manifest did its job.
+- The owner sent a chat message in that window and received an answer.
+
+Two background requests in the same window (14:40:00, the configured utility models) ended with the **designed** fail-closed error `item:message@response.output_item.added`: the gateway streamed a `message` item whose `role`/`phase` cannot be represented as native chat output (rule in src/responses.ts, covered by tests/responses.test.ts). Not a regression from placement, and not yet diagnosed further — a raw SSE capture from one of those requests is the next step.
+
 ## Repeatable direct host checks
 
 ```sh
@@ -84,8 +108,9 @@ Requires owner-authorized deployment of the scoped SaaS change and a disposable 
 | Linux desktop local UI | Passed, 1.141.0 | Passed, signed-out activation/commands on 1.141.0 | Pending |
 | macOS desktop local UI | Pending | Pending | Pending |
 | Windows desktop local UI | Pending | Pending | Pending |
-| Remote SSH, local UI extension | Pending | Pending | Pending |
-| WSL, local UI extension | Pending | Pending | Pending |
-| Dev Container, local UI extension | Pending | Pending | Pending |
+| Remote SSH, workspace extension host | Passed, 1.145.2 (placement, resolution, stream) | Probe VSIX, 1.145.2 | Chat answered; remote sign-in pending a live check |
+| Remote SSH, local-only install | Unit-checked: no provider/MCP registration, one placement warning | Pending | Pending |
+| WSL, workspace extension host | Pending | Pending | Pending |
+| Dev Container, workspace extension host | Pending | Pending | Pending |
 
-Browser-only VS Code and remote workspace extension-host placement are deliberately unsupported. Unit placement checks are not a remote smoke test. Marketplace publisher ownership, publication authority, cross-platform/remote checks, packaged live-login/inference and live native compatibility remain release gates.
+Browser-only VS Code is unsupported. Marketplace publisher ownership, publication authority, cross-platform/remote checks beyond the row above, packaged live-login/inference and live native compatibility remain release gates. Unit placement checks are not a remote smoke test; the Remote SSH row is host evidence, the local-only row is not.

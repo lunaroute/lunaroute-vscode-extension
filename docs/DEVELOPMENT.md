@@ -7,7 +7,8 @@ user-facing listing; everything below is repo-only (not shipped in the VSIX).
 
 - `src/` — extension source. `responses.ts` owns the request builder and the strict stream
   validator; `provider.ts` the native chat provider; `catalog.ts` model discovery; `auth.ts` the
-  loopback + SecretStorage sign-in; `extension.ts` activation, commands and the MCP contribution.
+  loopback + SecretStorage sign-in; `extension.ts` activation, placement, commands and the MCP
+  contribution.
 - `tests/` — unit tests plus `tests/host/`, which runs real VS Code 1.141 against packaged and
   source builds, and `tests/check-vsix*.py`, the archive allowlist/credential checkers.
 - `docs/smoke-checklist.md` — the verification ledger: what is proven, how, and what is still open.
@@ -32,6 +33,16 @@ python3 tests/check-vsix-negative.py lunaroute.vsix
 
 The sandboxed toolchain used on the development machine (Node 24, Xvfb, the pinned VS Code build)
 lives under ignored `.vscode-test/` with a command-local `PATH`; nothing is installed system-wide.
+
+## Placement
+
+`extensionKind` is `["workspace", "ui"]`. Chat resolves models in the extension host that serves
+the workspace, so a remote window needs the copy installed in the remote host. A copy running in the
+UI host of a remote window registers no chat provider and no MCP server, and warns once with the
+`placement` message instead of listing models that window cannot resolve. `auth.ts` forwards its
+loopback callback through `vscode.env.asExternalUri` (injected as `deps.forward`) so a browser on the
+client can reach a listener bound on the remote host; a forwarded authority that is not loopback
+fails as `callback` rather than hanging.
 
 ## Packaging rules
 

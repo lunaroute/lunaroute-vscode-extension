@@ -14,9 +14,14 @@ it.each([
   ['auth', /sign in/i], ['policy', /permission/i], ['billing', /billing|plan/i],
   ['rate-limit', /rate|limit/i], ['network', /connect|network/i], ['upstream', /unavailable|service/i],
   ['storage', /secure|credential/i], ['input', /input|chat/i], ['protocol', /response/i],
-  ['cancelled', /cancel/i],
+  ['cancelled', /cancel/i], ['callback', /callback/i],
 ] as [FailureKind, RegExp][])('provides actionable, static %s guidance', (kind, text) => {
   expect(userMessage(new LunaRouteError(kind))).toMatch(text);
+});
+it('reports a remote sign-in callback it cannot reach as its own failure', () => {
+  const message = userMessage(new LunaRouteError('callback'));
+  expect(message).toMatch(/callback/i);
+  expect(message).toMatch(/remote|local/i);
 });
 it.each(['17', 'Sat, 10 Oct 2026 12:00:17 GMT'])('shows safe Retry-After timing for %s', header => {
   const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-10-10T12:00:00Z'));
